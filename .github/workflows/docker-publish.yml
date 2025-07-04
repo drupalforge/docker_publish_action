@@ -1,0 +1,61 @@
+name: Docker build and push workflow
+on:
+  workflow_call:
+    inputs:
+      dockerhub_username:
+        description: 'Docker Hub username'
+        required: true
+        type: string
+    secrets:
+      dockerhub_token:
+        description: 'Docker Hub token'
+        required: true
+      dp_ai_virtual_key:
+        description: 'DevPanel AI Virtual Key'
+        required: false
+jobs:
+  build-application:
+    runs-on: ubuntu-latest
+    services:
+      webserver:
+        image: devpanel/php:8.3-base-ai
+        env:
+          DP_APP_ID: ${{ github.repository }}
+          APP_ROOT: '/var/www/html'
+          WEB_ROOT: '/var/www/html/web'
+          CODES_USER_DATA_DIR: '/var/www/html/.vscode'
+          CODES_WORKING_DIR: '/var/www/html'
+          APACHE_RUN_USER: 'www'
+          APACHE_RUN_GROUP: 'www'
+          CODES_ENABLE: 'yes'
+          DB_HOST: mysql
+          DB_PORT: 3306
+          DB_ROOT_PASSWORD: root
+          DB_NAME: drupaldb
+          DB_USER: user
+          DB_PASSWORD: password
+          DB_DRIVER: mysql
+          DP_AI_VIRTUAL_KEY: ${{ secrets.dp_ai_virtual_key || null }}
+        ports:
+          - 80:80
+        volumes:
+          - ${{ github.workspace }}:/app/
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_USER: user
+          MYSQL_PASSWORD: password
+          MYSQL_DATABASE: drupaldb
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root --password=root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: drupalforge/docker_publish_action@main
+        with:
+          dockerhub_username: ${{ inputs.dockerhub_username }}
+          dockerhub_token: ${{ secrets.dockerhub_token }}
