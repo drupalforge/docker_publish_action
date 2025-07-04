@@ -28,6 +28,22 @@ If your repository is in the [Drupal Forge](https://github.com/drupalforge) orga
 
 ## Configuration
 
+If you do not use the reusable workflow, provide the required configuration yourself. For example:
+
+```yaml
+steps:
+  - uses: drupalforge/docker_publish_action@main
+    env:
+      WEBSERVER: ${{ job.services.webserver.id }}
+    with:
+      dockerhub_username: ${{ inputs.dockerhub_username }}
+      dockerhub_token: ${{ secrets.dockerhub_token }}
+```
+
+### Environment Variables
+
+- `WEBSERVER`: The ID of the running webserver container.  
+
 ### Inputs
 
 - `dockerhub_username`: Your Docker Hub username (can be set as a repository variable).
@@ -42,7 +58,7 @@ Set these in your GitHub repository:
 - `DP_AI_VIRTUAL_KEY` (optional): An AI virtual key from ai.drupalforge.org (set as a secret).
 
 ---
-
 **Notes:**
+- The `WEBSERVER` environment variable must be set to the running container ID so the action can execute commands inside the correct container.
 - The action expects the `webserver` and `mysql` services to be defined in your workflow.
 - Input and secret names must match between your workflow and the action.
