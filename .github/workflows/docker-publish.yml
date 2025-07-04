@@ -55,7 +55,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: drupalforge/docker_publish_action@v.0.0.1
+      - uses: drupalforge/docker_publish_action@main
         with:
           dockerhub_username: ${{ inputs.dockerhub_username }}
           dockerhub_token: ${{ secrets.dockerhub_token }}
