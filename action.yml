@@ -35,7 +35,7 @@ runs:
         docker exec $WEBSERVER bash -c "cd \$APP_ROOT && ls -al"
         docker exec $WEBSERVER bash -c "\$APP_ROOT/.devpanel/init.sh"
         echo "DUMPS DATABASE + STATIC FILE"
-        docker exec $WEBSERVER bash -c "\$APP_ROOT/.devpanel/quickstart/create_quickstart.sh"
+        docker exec $WEBSERVER bash -c "\$APP_ROOT/.devpanel/create_quickstart.sh"
         docker exec $WEBSERVER bash -c "rm \$APP_ROOT/.devpanel/dumps/files.tgz"
       shell: bash
 
