@@ -48,6 +48,7 @@ steps:
 
 - `dockerhub_username`: Your Docker Hub username (can be set as a repository variable).
 - `dockerhub_token`: Your Docker Hub access token (set as a secret).
+- `image_repo`: (optional) Your Docker Hub image repository name. Defaults to the GitHub repository name.
 - `dp_ai_virtual_key` (optional): An AI virtual key from ai.drupalforge.org (set as a secret).
 
 ### Secrets
