@@ -6,6 +6,10 @@ on:
         description: 'Docker Hub username'
         required: true
         type: string
+      image_repo:
+        description: 'Docker Hub image repository'
+        required: false
+        type: string
     secrets:
       dockerhub_token:
         description: 'Docker Hub token'
@@ -64,3 +68,4 @@ jobs:
         with:
           dockerhub_username: ${{ inputs.dockerhub_username }}
           dockerhub_token: ${{ secrets.dockerhub_token }}
+          image_repo: ${{ inputs.image_repo || null }}

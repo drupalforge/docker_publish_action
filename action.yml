@@ -11,6 +11,9 @@ inputs:
   dockerhub_token:
     description: 'Docker Hub token'
     required: true
+  image_repo:
+    description: 'Docker Hub image repository'
+    required: false
 runs:
   using: "composite"
   steps:
@@ -42,16 +45,20 @@ runs:
         username: ${{ inputs.dockerhub_username }}
         password: ${{ inputs.dockerhub_token }}
 
+    - name: Set IMAGE_REPO variable
+      run: |
+        echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
+      shell: bash
+
     - name: Commit and push the container state to Docker Hub
       run: |
-        IMAGE_TAG=${{ github.repository }}:${{ github.ref_name }}
-        docker commit $WEBSERVER $IMAGE_TAG
-        docker push $IMAGE_TAG
+        docker commit $WEBSERVER $IMAGE_REPO:${{ github.ref_name }}
+        docker push $IMAGE_REPO:${{ github.ref_name }}
       shell: bash
 
     - name: Push to tag latest
       if: ${{ github.ref_name == github.event.repository.default_branch }}
       run: |
-        docker commit $WEBSERVER ${{ github.repository }}:latest
-        docker push ${{ github.repository }}:latest
+        docker commit $WEBSERVER $IMAGE_REPO:latest
+        docker push $IMAGE_REPO:latest
       shell: bash
