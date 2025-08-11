@@ -49,6 +49,8 @@ steps:
 - `dockerhub_username`: Your Docker Hub username (can be set as a repository variable).
 - `dockerhub_token`: Your Docker Hub access token (set as a secret).
 - `image_repo`: (optional) Your Docker Hub image repository name. Defaults to the GitHub repository name.
+- `files_to_hash`: (optional) A list of files to check for changes. A new image will not be published if none of these files has changed. Defaults to composer.lock if not provided.
+- `cached_hash`: (optional) Previously cached files hash for comparison.
 - `dp_ai_virtual_key` (optional): An AI virtual key from ai.drupalforge.org (set as a secret).
 
 ### Secrets

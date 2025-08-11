@@ -7,7 +7,11 @@ on:
         required: true
         type: string
       image_repo:
-        description: 'Docker Hub image repository'
+        description: 'Docker Hub image repository. Defaults to the repository name if not provided.'
+        required: false
+        type: string
+      files_to_hash:
+        description: 'List of files to check for changes (space or newline separated). Defaults to composer.lock if not provided.'
         required: false
         type: string
     secrets:
@@ -62,10 +66,44 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
+      - name: Restore file hash cache
+        if: ${{ github.event_name != 'push' }}
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: .files_hash.cache
+          key: files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}
+
+      - name: Read cached hash value
+        if: steps.cache.outputs.cache-hit
+        id: read_cached_hash
+        run: |
+          echo "cached_hash=$(cat .files_hash.cache)" >> $GITHUB_OUTPUT
+        shell: bash
+
       - uses: drupalforge/docker_publish_action@main
+        id: publish
         env:
           WEBSERVER: ${{ job.services.webserver.id }}
         with:
           dockerhub_username: ${{ inputs.dockerhub_username }}
           dockerhub_token: ${{ secrets.dockerhub_token }}
           image_repo: ${{ inputs.image_repo || null }}
+          files_to_hash: ${{ inputs.files_to_hash || null }}
+          cached_hash: ${{ steps.read_cached_hash.outputs.cached_hash || null }}
+
+      - name: Save new hash to cache file
+        id: save_hash_file
+        if: steps.publish.outputs.files_hash
+        run: |
+          echo "${{ steps.publish.outputs.files_hash }}" > .files_hash.cache
+        shell: bash
+
+      - name: Save hash to cache
+        if: steps.save_hash_file.conclusion == 'success'
+        uses: actions/cache@v4
+        with:
+          path: .files_hash.cache
+          key: files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}:${{ github.run_id }}:${{ github.run_attempt }}
+          restore-keys: |
+            files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}

@@ -14,6 +14,16 @@ inputs:
   image_repo:
     description: 'Docker Hub image repository'
     required: false
+  files_to_hash:
+    description: 'List of files to check for changes (space or newline separated). Defaults to composer.lock if not provided.'
+    required: false
+  cached_hash:
+    description: 'Previously cached files hash for comparison.'
+    required: false
+outputs:
+  files_hash:
+    description: 'Hash of the files after build'
+    value: ${{ steps.setup.outputs.files_hash }}
 runs:
   using: "composite"
   steps:
@@ -21,6 +31,10 @@ runs:
       uses: actions/checkout@v4
 
     - name: Setup Drupal
+      id: setup
+      env:
+        CACHED_HASH: ${{ inputs.cached_hash }}
+        FILES_TO_HASH: ${{ inputs.files_to_hash || 'composer.lock' }}
       run: |
         echo "PREPARE DIR FOR INSTALL"
         docker exec $WEBSERVER bash -c "sudo rm -rf \$APP_ROOT && sudo mkdir -p \$APP_ROOT"
@@ -34,30 +48,70 @@ runs:
         echo "INSTALL DRUPAL"
         docker exec $WEBSERVER bash -c "cd \$APP_ROOT && ls -al"
         docker exec $WEBSERVER bash -c "\$APP_ROOT/.devpanel/init.sh"
+        echo "CHECK FOR CHANGES"
+        HASH=""
+        if [ -n "$FILES_TO_HASH" ]; then
+          echo "Hashing $FILES_TO_HASH in \$APP_ROOT to check for changes."
+          EXISTING_FILES=""
+          # Use eval and set to handle quoted filenames with spaces
+          eval set -- $FILES_TO_HASH
+          for f; do
+            # Always check relative to $APP_ROOT
+            if docker exec $WEBSERVER bash -c "cd \$APP_ROOT && [ -f \"$f\" ]"; then
+              EXISTING_FILES="${EXISTING_FILES}${f}\n"
+            fi
+          done
+          if [ -n "$EXISTING_FILES" ]; then
+            EXISTING_FILES=$(printf "%b" "$EXISTING_FILES" | sort)
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              FILE_HASH=$(docker exec $WEBSERVER bash -c "cd \$APP_ROOT && sha256sum \"$f\" | awk '{print \$1}'")
+              if [ -z "$HASH" ]; then
+                HASH="$FILE_HASH"
+              else
+                HASH=$(printf "%s%s" "$HASH" "$FILE_HASH" | sha256sum | awk '{print $1}')
+              fi
+            done <<< "$EXISTING_FILES"
+          fi
+          # Only set files_hash output if the hash has changed (not skipping)
+          if [ -n "${CACHED_HASH+x}" ] && [ "$CACHED_HASH" = "$HASH" ]; then
+            # Skip if not a push event.
+            if [ "${{ github.event_name }}" != "push" ]; then
+              echo "Hash unchanged, skipping rest of the action."
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          else
+            echo "files_hash=$HASH" >> $GITHUB_OUTPUT
+          fi
+        fi
         echo "DUMPS DATABASE + STATIC FILE"
         docker exec $WEBSERVER bash -c "\$APP_ROOT/.devpanel/create_quickstart.sh"
         docker exec $WEBSERVER bash -c "rm \$APP_ROOT/.devpanel/dumps/files.tgz"
       shell: bash
 
     - name: Login to Docker Hub
+      if: steps.setup.outputs.skip == ''
       uses: docker/login-action@v2
       with:
         username: ${{ inputs.dockerhub_username }}
         password: ${{ inputs.dockerhub_token }}
 
     - name: Set IMAGE_REPO variable
+      if: steps.setup.outputs.skip == ''
       run: |
         echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
       shell: bash
 
     - name: Commit and push the container state to Docker Hub
+      if: steps.setup.outputs.skip == ''
       run: |
         docker commit $WEBSERVER $IMAGE_REPO:${{ github.ref_name }}
         docker push $IMAGE_REPO:${{ github.ref_name }}
       shell: bash
 
     - name: Push to tag latest
-      if: ${{ github.ref_name == github.event.repository.default_branch }}
+      if: steps.setup.outputs.skip == '' && github.ref_name == github.event.repository.default_branch
       run: |
         docker commit $WEBSERVER $IMAGE_REPO:latest
         docker push $IMAGE_REPO:latest
