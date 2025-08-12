@@ -25,49 +25,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  build-application:
+  build-and-push:
     runs-on: ubuntu-latest
-    services:
-      webserver:
-        image: devpanel/php:8.3-base-ai
-        env:
-          DP_APP_ID: ${{ github.repository }}
-          APP_ROOT: '/var/www/html'
-          WEB_ROOT: '/var/www/html/web'
-          CODES_USER_DATA_DIR: '/var/www/html/.vscode'
-          CODES_WORKING_DIR: '/var/www/html'
-          APACHE_RUN_USER: 'www'
-          APACHE_RUN_GROUP: 'www'
-          CODES_ENABLE: 'yes'
-          DB_HOST: mysql
-          DB_PORT: 3306
-          DB_ROOT_PASSWORD: root
-          DB_NAME: drupaldb
-          DB_USER: user
-          DB_PASSWORD: password
-          DB_DRIVER: mysql
-          DP_AI_VIRTUAL_KEY: ${{ secrets.dp_ai_virtual_key || null }}
-        ports:
-          - 80:80
-        volumes:
-          - ${{ github.workspace }}:/app/
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_USER: user
-          MYSQL_PASSWORD: password
-          MYSQL_DATABASE: drupaldb
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h localhost -u root --password=root"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
+    strategy:
+      matrix:
+        arch: [linux/amd64, linux/arm64]
+    outputs:
+      digest_json_amd64: ${{ steps.publish.outputs.digest_json }}
+      digest_json_arm64: ${{ steps.publish.outputs.digest_json }}
     steps:
-      - name: Restore file hash cache
-        if: ${{ github.event_name != 'push' }}
+      - name: Restore files hash cache
         id: cache
         uses: actions/cache@v4
         with:
@@ -75,35 +42,62 @@ jobs:
           key: files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}
 
       - name: Read cached hash value
-        if: steps.cache.outputs.cache-hit
         id: read_cached_hash
         run: |
-          echo "cached_hash=$(cat .files_hash.cache)" >> $GITHUB_OUTPUT
+          if [ -f .files_hash.cache ]; then
+            echo "cached_hash=$(cat .files_hash.cache)" >> $GITHUB_OUTPUT
+          fi
         shell: bash
 
       - uses: drupalforge/docker_publish_action@main
         id: publish
-        env:
-          WEBSERVER: ${{ job.services.webserver.id }}
         with:
-          dockerhub_username: ${{ inputs.dockerhub_username }}
+          dockerhub_username: ${{ secrets.dockerhub_username }}
           dockerhub_token: ${{ secrets.dockerhub_token }}
-          image_repo: ${{ inputs.image_repo || null }}
+          image_repo: ${{ inputs.image_repo || github.repository }}
           files_to_hash: ${{ inputs.files_to_hash || null }}
-          cached_hash: ${{ steps.read_cached_hash.outputs.cached_hash || null }}
+          build_platform: ${{ matrix.arch }}
+          cached_hash: ${{ steps.read_cached_hash.outputs.cached_hash || '' }}
+
+      - name: Cancel workflow if hash unchanged
+        if: steps.publish.outputs.files_hash == steps.read_cached_hash.outputs.cached_hash
+        run: |
+          echo "No changes detected. Cancelling workflow."
+          gh run cancel ${{ github.run_id }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Save new hash to cache file
-        id: save_hash_file
-        if: steps.publish.outputs.files_hash
+        if: steps.publish.outputs.files_hash && steps.publish.outputs.files_hash != steps.read_cached_hash.outputs.cached_hash
         run: |
           echo "${{ steps.publish.outputs.files_hash }}" > .files_hash.cache
         shell: bash
 
       - name: Save hash to cache
-        if: steps.save_hash_file.conclusion == 'success'
+        if: steps.publish.outputs.files_hash && steps.publish.outputs.files_hash != steps.read_cached_hash.outputs.cached_hash
         uses: actions/cache@v4
         with:
           path: .files_hash.cache
           key: files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}:${{ github.run_id }}:${{ github.run_attempt }}
           restore-keys: |
             files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}
+
+  create-manifest:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge digests to JSON
+        id: merge_digests
+        run: |
+          echo '${{ needs.build-and-push.outputs.digest_json_amd64 }}' > d1.json
+          echo '${{ needs.build-and-push.outputs.digest_json_arm64 }}' > d2.json
+          jq -s 'add' d1.json d2.json > digests.json
+          cat digests.json
+          echo "digests_json=$(cat digests.json)" >> $GITHUB_OUTPUT
+
+      - uses: drupalforge/docker_publish_action@develop
+        with:
+          dockerhub_username: ${{ secrets.dockerhub_username }}
+          dockerhub_token: ${{ secrets.dockerhub_token }}
+          image_repo: ${{ inputs.image_repo || github.repository }}
+          manifest_digests: ${{ steps.merge_digests.outputs.digests_json }}

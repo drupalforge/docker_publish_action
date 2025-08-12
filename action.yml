@@ -20,99 +20,137 @@ inputs:
   cached_hash:
     description: 'Previously cached files hash for comparison.'
     required: false
-outputs:
-  files_hash:
-    description: 'Hash of the files after build'
-    value: ${{ steps.setup.outputs.files_hash }}
+  build_platform:
+    description: 'Target platform for the build (e.g., linux/amd64, linux/arm64)'
+    required: false
+  manifest_digests:
+    description: 'JSON map of platform labels to digests for manifest creation.'
+    required: false
 runs:
   using: "composite"
   steps:
     - name: Check out code
       uses: actions/checkout@v4
 
-    - name: Setup Drupal
-      id: setup
-      env:
-        CACHED_HASH: ${{ inputs.cached_hash }}
-        FILES_TO_HASH: ${{ inputs.files_to_hash || 'composer.lock' }}
-      run: |
-        echo "PREPARE DIR FOR INSTALL"
-        docker exec $WEBSERVER bash -c 'sudo rm -rf $APP_ROOT && sudo mkdir -p $APP_ROOT'
-        docker exec $WEBSERVER bash -c 'sudo cp -r /app/. $APP_ROOT/.'
-        docker exec $WEBSERVER bash -c 'sudo chown -R www:www $APP_ROOT'
-        docker exec $WEBSERVER bash -c 'export && cd $APP_ROOT && ls -al'
-        echo "SET UP GIT"
-        docker exec $WEBSERVER bash -c 'git config --global --add safe.directory $APP_ROOT'
-        echo "INSTALL CUSTOM PACKAGE"
-        docker exec $WEBSERVER bash -c '$APP_ROOT/.devpanel/custom_package_installer.sh'
-        echo "INSTALL DRUPAL"
-        docker exec $WEBSERVER bash -c 'cd $APP_ROOT && ls -al'
-        docker exec $WEBSERVER bash -c '$APP_ROOT/.devpanel/init.sh'
-        echo "CHECK FOR CHANGES"
-        HASH=""
-        if [ -n "$FILES_TO_HASH" ]; then
-          echo "Hashing $FILES_TO_HASH in \$APP_ROOT to check for changes."
-          EXISTING_FILES=""
-          # Use eval and set to handle quoted filenames with spaces
-          eval set -- $FILES_TO_HASH
-          for f; do
-            # Always check relative to $APP_ROOT
-            if docker exec $WEBSERVER bash -c "cd \$APP_ROOT && [ -f \"$f\" ]"; then
-              EXISTING_FILES="${EXISTING_FILES}${f}\n"
-            fi
-          done
-          if [ -n "$EXISTING_FILES" ]; then
-            EXISTING_FILES=$(printf "%b" "$EXISTING_FILES" | sort)
-            while IFS= read -r f; do
-              [ -z "$f" ] && continue
-              FILE_HASH=$(docker exec $WEBSERVER bash -c "cd \$APP_ROOT && sha256sum \"$f\" | awk '{print \$1}'")
-              if [ -z "$HASH" ]; then
-                HASH="$FILE_HASH"
-              else
-                HASH=$(printf "%s%s" "$HASH" "$FILE_HASH" | sha256sum | awk '{print $1}')
-              fi
-            done <<< "$EXISTING_FILES"
-          fi
-          # Only set files_hash output if the hash has changed (not skipping)
-          if [ -n "${CACHED_HASH+x}" ] && [ "$CACHED_HASH" = "$HASH" ]; then
-            # Skip if not a push event.
-            if [ "${{ github.event_name }}" != "push" ]; then
-              echo "Hash unchanged, skipping rest of the action."
-              echo "skip=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          else
-            echo "files_hash=$HASH" >> $GITHUB_OUTPUT
-          fi
-        fi
-        echo "DUMPS DATABASE + STATIC FILE"
-        docker exec $WEBSERVER bash -c "\$APP_ROOT/.devpanel/create_quickstart.sh"
-        docker exec $WEBSERVER bash -c "rm \$APP_ROOT/.devpanel/dumps/files.tgz"
-      shell: bash
-
-    - name: Login to Docker Hub
-      if: steps.setup.outputs.skip == ''
+    # Multi-arch manifest creation path
+    - name: Log in to Docker Hub (for manifest)
+      if: inputs.manifest_digests != ''
       uses: docker/login-action@v2
       with:
         username: ${{ inputs.dockerhub_username }}
         password: ${{ inputs.dockerhub_token }}
 
-    - name: Set IMAGE_REPO variable
-      if: steps.setup.outputs.skip == ''
-      run: |
-        echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
+    - name: Create and push manifest (if manifest_digests is set and complete)
+      if: inputs.manifest_digests != ''
+      id: create_manifest
       shell: bash
+      run: |
+        DIGESTS_JSON='${{ inputs.manifest_digests }}'
+        IMAGE_REPO="${{ inputs.image_repo || github.repository }}"
+        TAG="${{ github.ref_name }}"
+        REQUIRED_PLATFORMS="linux/amd64 linux/arm64"
+        PLATFORMS=$(echo "$DIGESTS_JSON" | jq -r 'keys[]')
+        for REQ in $REQUIRED_PLATFORMS; do
+          if ! echo "$PLATFORMS" | grep -q "^$REQ$"; then
+            echo "Missing digest for $REQ, skipping manifest build."
+            exit 0
+          fi
+        done
+        echo "Creating manifest from digests: $DIGESTS_JSON"
+        CREATE_CMD="docker manifest create $IMAGE_REPO:$TAG"
+        for PLATFORM in $REQUIRED_PLATFORMS; do
+          DIGEST=$(echo "$DIGESTS_JSON" | jq -r --arg p "$PLATFORM" '.[$p]')
+          CREATE_CMD="$CREATE_CMD --amend $IMAGE_REPO@$DIGEST"
+        done
+        echo "$CREATE_CMD"
+        eval $CREATE_CMD
+        docker manifest push $IMAGE_REPO:$TAG
+      env:
+        DOCKER_CLI_EXPERIMENTAL: enabled
 
-    - name: Commit and push the container state to Docker Hub
-      if: steps.setup.outputs.skip == ''
-      run: |
-        docker commit $WEBSERVER $IMAGE_REPO:${{ github.ref_name }}
-        docker push $IMAGE_REPO:${{ github.ref_name }}
-      shell: bash
+    # Single-arch build and push path
+    - name: Build image (no push)
+      if: inputs.manifest_digests == ''
+      id: build_image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: ${{ inputs.build_platform || 'linux/amd64' }}
+        push: false
+        load: true
 
-    - name: Push to tag latest
-      if: steps.setup.outputs.skip == '' && github.ref_name == github.event.repository.default_branch
-      run: |
-        docker commit $WEBSERVER $IMAGE_REPO:latest
-        docker push $IMAGE_REPO:latest
+    - name: Compute files hash in built image
+      if: inputs.manifest_digests == ''
+      id: files_hash
       shell: bash
+      run: |
+        FILES_TO_HASH="${{ inputs.files_to_hash || 'composer.lock' }}"
+        HASH=""
+        EXISTING_FILES=""
+        eval set -- $FILES_TO_HASH
+        for f; do
+          if docker run --rm tempimage:latest bash -c "[ -f $f ]"; then
+            EXISTING_FILES="$EXISTING_FILES$f\n"
+          fi
+        done
+        if [ -n "$EXISTING_FILES" ]; then
+          EXISTING_FILES=$(printf "%b" "$EXISTING_FILES" | sort)
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            FILE_HASH=$(docker run --rm tempimage:latest bash -c "sha256sum $f | awk '{print \$1}'")
+            if [ -z "$HASH" ]; then
+              HASH="$FILE_HASH"
+            else
+              HASH=$(printf "%s%s" "$HASH" "$FILE_HASH" | sha256sum | awk '{print $1}')
+            fi
+          done <<< "$EXISTING_FILES"
+        fi
+        echo "files_hash=$HASH" >> $GITHUB_OUTPUT
+
+    - name: Check hash and maybe skip
+      if: inputs.manifest_digests == ''
+      id: check_hash
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.cached_hash }}" ] && [ "${{ inputs.cached_hash }}" = "${{ steps.files_hash.outputs.files_hash }}" ]; then
+          echo "skip=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Log in to Docker Hub (for single image)
+      if: inputs.manifest_digests == '' && steps.check_hash.outputs.skip != 'true'
+      uses: docker/login-action@v2
+      with:
+        username: ${{ inputs.dockerhub_username }}
+        password: ${{ inputs.dockerhub_token }}
+
+    - name: Tag and push single image if not manifest build
+      if: inputs.manifest_digests == '' && steps.check_hash.outputs.skip != 'true'
+      id: tag_and_push
+      shell: bash
+      run: |
+        IMAGE_REPO="${{ inputs.image_repo || github.repository }}"
+        TAG="${{ github.ref_name }}"
+        docker tag tempimage:latest $IMAGE_REPO:$TAG
+        docker push $IMAGE_REPO:$TAG
+
+    - name: Output digest as JSON
+      if: inputs.manifest_digests == '' && steps.check_hash.outputs.skip != 'true'
+      id: output_digest
+      shell: bash
+      run: |
+        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ inputs.image_repo || github.repository }}:${{ github.ref_name }})
+        echo "{\"${{ inputs.build_platform }}\": \"$DIGEST\"}" > digest.json
+        cat digest.json
+        echo "digest_json=$(cat digest.json)" >> $GITHUB_OUTPUT
+        echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+outputs:
+  files_hash:
+    description: 'Hash of the files after build'
+    value: ${{ steps.files_hash.outputs.files_hash }}
+  digest_json:
+    description: 'Digest JSON for this platform'
+    value: ${{ steps.output_digest.outputs.digest_json }}
+  digest:
+    description: 'Image digest for this platform'
+    value: ${{ steps.output_digest.outputs.digest }}
