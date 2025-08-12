@@ -25,32 +25,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  build-application:
+  build-and-push:
     runs-on: ubuntu-latest
     services:
-      webserver:
-        image: devpanel/php:8.3-base-ai
-        env:
-          DP_APP_ID: ${{ github.repository }}
-          APP_ROOT: '/var/www/html'
-          WEB_ROOT: '/var/www/html/web'
-          CODES_USER_DATA_DIR: '/var/www/html/.vscode'
-          CODES_WORKING_DIR: '/var/www/html'
-          APACHE_RUN_USER: 'www'
-          APACHE_RUN_GROUP: 'www'
-          CODES_ENABLE: 'yes'
-          DB_HOST: mysql
-          DB_PORT: 3306
-          DB_ROOT_PASSWORD: root
-          DB_NAME: drupaldb
-          DB_USER: user
-          DB_PASSWORD: password
-          DB_DRIVER: mysql
-          DP_AI_VIRTUAL_KEY: ${{ secrets.dp_ai_virtual_key || null }}
-        ports:
-          - 80:80
-        volumes:
-          - ${{ github.workspace }}:/app/
       mysql:
         image: mysql:8.0
         env:
@@ -65,9 +42,15 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+    strategy:
+      matrix:
+        arch: [linux/amd64]
+    outputs:
+      digest_amd64: ${{ steps.publish.outputs.digest }}
+      skip_manifest: ${{ steps.set_skip_manifest.outputs.skip_manifest }}
     steps:
-      - name: Restore file hash cache
-        if: ${{ github.event_name != 'push' }}
+      - name: Restore files hash cache
+        if: github.event_name != 'push'
         id: cache
         uses: actions/cache@v4
         with:
@@ -81,29 +64,55 @@ jobs:
           echo "cached_hash=$(cat .files_hash.cache)" >> $GITHUB_OUTPUT
         shell: bash
 
-      - uses: drupalforge/docker_publish_action@main
+      - uses: drupalforge/docker_publish_action/platform@develop
         id: publish
         env:
-          WEBSERVER: ${{ job.services.webserver.id }}
+          NETWORK: ${{ job.services.mysql.network }}
         with:
           dockerhub_username: ${{ inputs.dockerhub_username }}
           dockerhub_token: ${{ secrets.dockerhub_token }}
-          image_repo: ${{ inputs.image_repo || null }}
+          dp_ai_virtual_key: ${{ secrets.dp_ai_virtual_key || null }}
+          image_repo: ${{ inputs.image_repo || github.repository }}
           files_to_hash: ${{ inputs.files_to_hash || null }}
           cached_hash: ${{ steps.read_cached_hash.outputs.cached_hash || null }}
+          build_platform: ${{ matrix.arch }}
+
+      - name: Cancel workflow if hash unchanged
+        if: github.event_name != 'push' && steps.publish.outputs.files_hash == steps.read_cached_hash.outputs.cached_hash
+        id: set_skip_manifest
+        run: |
+          echo "No changes detected. Exiting this job."
+          echo "skip_manifest=true" >> $GITHUB_ENV
+          exit 0
+        shell: bash
 
       - name: Save new hash to cache file
         id: save_hash_file
-        if: steps.publish.outputs.files_hash
         run: |
           echo "${{ steps.publish.outputs.files_hash }}" > .files_hash.cache
         shell: bash
 
       - name: Save hash to cache
-        if: steps.save_hash_file.conclusion == 'success'
         uses: actions/cache@v4
         with:
           path: .files_hash.cache
           key: files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}:${{ github.run_id }}:${{ github.run_attempt }}
           restore-keys: |
             files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}
+
+  create-manifest:
+    needs: build-and-push
+    if: needs.build-and-push.outputs.skip_manifest != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge digests to JSON
+        id: digests
+        run: |
+          echo 'digests={"linux/amd64": "${{ needs.build-and-push.outputs.digest_amd64 }}" }' >> $GITHUB_OUTPUT
+
+      - uses: drupalforge/docker_publish_action/manifest@develop
+        with:
+          dockerhub_username: ${{ secrets.dockerhub_username }}
+          dockerhub_token: ${{ secrets.dockerhub_token }}
+          image_repo: ${{ inputs.image_repo || github.repository }}
+          manifest_digests: ${{ steps.digests.outputs.digests }}

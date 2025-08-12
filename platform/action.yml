@@ -1,5 +1,5 @@
-name: 'Drupal Forge Docker Publish'
-description: 'Builds and pushes a Docker image for a Drupal Forge template.'
+name: 'Drupal Forge build platform image'
+description: 'Builds and pushes a platform image by digest to Docker Hub for a Drupal Forge template.'
 author: 'Drupal Forge'
 branding:
   icon: 'package'
@@ -24,19 +24,22 @@ inputs:
     description: 'Previously cached files hash for comparison.'
     required: false
   build_platform:
-    description: 'Target platforms for the build (e.g., linux/amd64,linux/arm64)'
+    description: 'Target platform for the build (e.g., linux/amd64, linux/arm64)'
     required: false
 runs:
   using: "composite"
   steps:
     - name: Check out code
       uses: actions/checkout@v4
+
+    - name: Check out Dockerfile
+      uses: actions/checkout@v4
       with:
         repository: drupalforge/docker_publish_action
         ref: develop
         path: docker_publish_action
 
-    - name: Login to Docker Hub
+    - name: Log in to Docker Hub
       uses: docker/login-action@v3
       with:
         username: ${{ inputs.dockerhub_username }}
@@ -47,6 +50,11 @@ runs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
+
+    - name: debug
+      run: |
+        ls -Alh .
+      shell: bash
 
     - name: Build image (no push)
       id: build_image
@@ -100,7 +108,7 @@ runs:
           for f; do
             # Always check relative to $APP_ROOT
             if docker exec $WEBSERVER bash -c "cd \$APP_ROOT && [ -f \"$f\" ]"; then
-              EXISTING_FILES="${EXISTING_FILES}\n${f}"
+              EXISTING_FILES="${EXISTING_FILES}${f}\n"
             fi
           done
           if [ -n "$EXISTING_FILES" ]; then
@@ -139,31 +147,18 @@ runs:
         docker exec $WEBSERVER bash -c 'rm $APP_ROOT/.devpanel/dumps/files.tgz'
       shell: bash
 
-    - name: Set IMAGE_REPO variable
-      run: |
-        echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
-      shell: bash
-
-    - name: Set tag to be pushed to Docker Hub
-      run: |
-        echo "TAGS='${{ github.ref_name }}'" >> $GITHUB_ENV
-      shell: bash
-
-    - name: Determine if the latest tag should be pushed to Docker Hub
-      if: github.ref_name == github.event.repository.default_branch
-      run: |
-        echo "TAGS=${TAGS} latest" >> $GITHUB_ENV
-      shell: bash
-
     - name: Commit and push the container state to Docker Hub
+      id: output_digest
       run: |
-        for TAG in $TAGS; do
-          echo "PUSHING TAG: $TAG"
-          docker commit $WEBSERVER $IMAGE_REPO:$TAG
-          docker push $IMAGE_REPO:$TAG
-        done
+        IMAGE_ID=$(docker commit $WEBSERVER)
+        DIGEST=$(docker push $IMAGE_ID | awk '/digest:/ {print $2}')
+        docker rm -f $WEBSERVER
+        echo "digest=$DIGEST" >> $GITHUB_OUTPUT
       shell: bash
 outputs:
   files_hash:
     description: 'Hash of the files after build'
-    value: ${{ steps.setup.outputs.files_hash }}
+    value: ${{ steps.hash_files.outputs.hash }}
+  digest:
+    description: 'Image digest for this platform'
+    value: ${{ steps.output_digest.outputs.digest }}
