@@ -9,6 +9,7 @@ The Drupal Forge Docker Publish Action is a GitHub Action designed to automate t
 - Automatically builds and pushes Docker images when called.
 - Includes a reusable workflow with environment variables and services for Drupal Forge applications.
 
+
 ## Usage
 
 To use this action in your GitHub workflow, call the reusable [docker-publish](.github/workflows/docker-publish.yml) workflow with the correct inputs and secrets:
@@ -26,6 +27,58 @@ jobs:
 
 If your repository is in the [Drupal Forge](https://github.com/drupalforge) organization, there will be a _Docker build and push template_ on the Actions tab that sets this up for you.
 
+## Actions
+
+### 1. Platform Build Action (`platform/action.yml`)
+
+**Description:**
+Builds a platform Docker image, runs post-build initialization, and outputs the image digest and file hash.
+
+**Inputs:**
+- `dockerhub_username` (required): Docker Hub username
+- `dockerhub_token` (required): Docker Hub token
+- `image_repo` (optional): Docker Hub image repository (defaults to GitHub repository)
+- `files_to_hash` (optional): List of files to check for changes (default: `composer.lock`)
+- `cached_hash` (optional): Previously cached files hash for comparison
+- `build_platform` (optional): Target platform (e.g., `linux/amd64`, `linux/arm64`)
+
+**Outputs:**
+- `files_hash`: Hash of the files after build
+- `digest`: Image digest for this platform
+
+**Usage Example:**
+```yaml
+- uses: ./platform
+  with:
+    dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+    dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+    image_repo: myorg/myimage
+    files_to_hash: composer.lock package.json
+    cached_hash: ${{ steps.read_cached_hash.outputs.cached_hash }}
+    build_platform: linux/amd64
+```
+
+### 2. Manifest Action (`manifest/action.yml`)
+
+**Description:**
+Creates and pushes a Docker manifest to Docker Hub for a multi-arch image, using digests from the platform builds.
+
+**Inputs:**
+- `dockerhub_username` (required): Docker Hub username
+- `dockerhub_token` (required): Docker Hub token
+- `image_repo` (optional): Docker Hub image repository (defaults to GitHub repository)
+- `manifest_digests` (required): JSON map of platform labels to digests
+
+**Usage Example:**
+```yaml
+- uses: ./manifest
+  with:
+    dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+    dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+    image_repo: myorg/myimage
+    manifest_digests: '{"linux/amd64": "sha256:...", "linux/arm64": "sha256:..."}'
+```
+
 ## Configuration
 
 If you do not use the reusable workflow, provide the required configuration yourself. For example:
@@ -33,16 +86,10 @@ If you do not use the reusable workflow, provide the required configuration your
 ```yaml
 steps:
   - uses: drupalforge/docker_publish_action@main
-    env:
-      WEBSERVER: ${{ job.services.webserver.id }}
     with:
-      dockerhub_username: ${{ inputs.dockerhub_username }}
-      dockerhub_token: ${{ secrets.dockerhub_token }}
+      dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+      dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
 ```
-
-### Environment Variables
-
-- `WEBSERVER`: The ID of the running webserver container.  
 
 ### Inputs
 
@@ -62,6 +109,5 @@ Set these in your GitHub repository:
 
 ---
 **Notes:**
-- The `WEBSERVER` environment variable must be set to the running container ID so the action can execute commands inside the correct container.
-- The action expects the `webserver` and `mysql` services to be defined in your workflow.
+- The action expects the `mysql` service to be defined in your workflow.
 - Input and secret names must match between your workflow and the action.
