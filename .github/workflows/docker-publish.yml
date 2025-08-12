@@ -25,32 +25,33 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  build-application:
+  retrieve-files-hash:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore files hash cache
+        if: github.event_name != 'push'
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .files_hash.cache
+          key: files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}:${{ github.run_id }}:${{ github.run_attempt }}
+          restore-keys: |
+            files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}
+
+      - name: Read cached hash value
+        if: steps.cache.outputs.cache-matched-key
+        id: read_cached_hash
+        run: |
+          echo "cached_hash=$(cat .files_hash.cache)" >> $GITHUB_OUTPUT
+          cat .files_hash.cache
+        shell: bash
+    outputs:
+      cached_hash: ${{ steps.read_cached_hash.outputs.cached_hash || null }}
+
+  build-and-push:
+    needs: retrieve-files-hash
     runs-on: ubuntu-latest
     services:
-      webserver:
-        image: devpanel/php:8.3-base-ai
-        env:
-          DP_APP_ID: ${{ github.repository }}
-          APP_ROOT: '/var/www/html'
-          WEB_ROOT: '/var/www/html/web'
-          CODES_USER_DATA_DIR: '/var/www/html/.vscode'
-          CODES_WORKING_DIR: '/var/www/html'
-          APACHE_RUN_USER: 'www'
-          APACHE_RUN_GROUP: 'www'
-          CODES_ENABLE: 'yes'
-          DB_HOST: mysql
-          DB_PORT: 3306
-          DB_ROOT_PASSWORD: root
-          DB_NAME: drupaldb
-          DB_USER: user
-          DB_PASSWORD: password
-          DB_DRIVER: mysql
-          DP_AI_VIRTUAL_KEY: ${{ secrets.dp_ai_virtual_key || null }}
-        ports:
-          - 80:80
-        volumes:
-          - ${{ github.workspace }}:/app/
       mysql:
         image: mysql:8.0
         env:
@@ -65,45 +66,81 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+    strategy:
+      matrix:
+        arch:
+          - linux/amd64
     steps:
-      - name: Restore file hash cache
-        if: ${{ github.event_name != 'push' }}
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: .files_hash.cache
-          key: files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}
-
-      - name: Read cached hash value
-        if: steps.cache.outputs.cache-hit
-        id: read_cached_hash
-        run: |
-          echo "cached_hash=$(cat .files_hash.cache)" >> $GITHUB_OUTPUT
-        shell: bash
-
-      - uses: drupalforge/docker_publish_action@main
+      - name: Publish image to Docker Hub
         id: publish
+        uses: drupalforge/docker_publish_action/platform@main
         env:
-          WEBSERVER: ${{ job.services.webserver.id }}
+          NETWORK: ${{ job.services.mysql.network }}
         with:
           dockerhub_username: ${{ inputs.dockerhub_username }}
           dockerhub_token: ${{ secrets.dockerhub_token }}
-          image_repo: ${{ inputs.image_repo || null }}
+          dp_ai_virtual_key: ${{ secrets.dp_ai_virtual_key || null }}
+          image_repo: ${{ inputs.image_repo || github.repository }}
           files_to_hash: ${{ inputs.files_to_hash || null }}
-          cached_hash: ${{ steps.read_cached_hash.outputs.cached_hash || null }}
+          cached_hash: ${{ needs.retrieve-files-hash.outputs.cached_hash || null }}
+          build_platform: ${{ matrix.arch }}
 
+      - name: Save image ID to file
+        if: steps.publish.outputs.skip != 'true'
+        id: save_image_id
+        run: |
+          ARCH_SAFE="${{ matrix.arch }}"
+          ARCH_SAFE="${ARCH_SAFE//\//_}"
+          echo "arch_safe=$ARCH_SAFE" >> $GITHUB_OUTPUT
+          echo '{ "${{ matrix.arch }}": "${{ steps.publish.outputs.image }}" }' > "${ARCH_SAFE}-image_id.json"
+
+      - name: Upload artifact with image ID
+        if: steps.publish.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.save_image_id.outputs.arch_safe }}-image_id
+          path: ${{ steps.save_image_id.outputs.arch_safe }}-image_id.json
+    outputs:
+      hash: ${{ steps.publish.outputs.hash }}
+      skip: ${{ steps.publish.outputs.skip }}
+
+  create-manifest:
+    needs: build-and-push
+    if: needs.build-and-push.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image ID artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-image_id'
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: Merge image ID artifacts to JSON
+        id: images
+        run: |
+          echo "images=$(jq -s 'add' ./artifacts/* | jq -c .)" >> $GITHUB_OUTPUT
+
+      - uses: drupalforge/docker_publish_action/manifest@main
+        with:
+          dockerhub_username: ${{ inputs.dockerhub_username }}
+          dockerhub_token: ${{ secrets.dockerhub_token }}
+          image_repo: ${{ inputs.image_repo || github.repository }}
+          manifest_images: ${{ steps.images.outputs.images }}
+
+  store-files-hash:
+    needs: build-and-push
+    if: needs.build-and-push.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
       - name: Save new hash to cache file
         id: save_hash_file
-        if: steps.publish.outputs.files_hash
         run: |
-          echo "${{ steps.publish.outputs.files_hash }}" > .files_hash.cache
+          echo "${{ needs.build-and-push.outputs.hash }}" > .files_hash.cache
         shell: bash
 
       - name: Save hash to cache
-        if: steps.save_hash_file.conclusion == 'success'
-        uses: actions/cache@v4
+        uses: actions/cache/save@v4
         with:
           path: .files_hash.cache
           key: files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}:${{ github.run_id }}:${{ github.run_attempt }}
-          restore-keys: |
-            files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}

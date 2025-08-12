@@ -1,0 +1,77 @@
+name: 'Drupal Forge publish image manifest'
+description: 'Pushes an image manifest to Docker Hub for a Drupal Forge template.'
+author: 'Drupal Forge'
+branding:
+  icon: 'package'
+  color: 'blue'
+inputs:
+  dockerhub_username:
+    description: 'Docker Hub username'
+    required: true
+  dockerhub_token:
+    description: 'Docker Hub token'
+    required: true
+  image_repo:
+    description: 'Docker Hub image repository'
+    required: false
+  manifest_images:
+    description: 'JSON map of platforms to images for manifest creation.'
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - name: Check if manifest_images is set and complete
+      id: check_images
+      env:
+        IMAGES_JSON: ${{ inputs.manifest_images }}
+      run: |
+        echo "$IMAGES_JSON" | jq -r '.[]' | while IFS= read -r IMAGE; do
+          if [ -z "$IMAGE" ]; then
+            echo "Missing or empty image, skipping manifest build."
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+        done
+      shell: bash
+
+    - name: Set IMAGE_REPO variable
+      if: steps.check_images.outputs.skip != 'true'
+      run: |
+        echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Set tag to be pushed to Docker Hub
+      if: steps.check_images.outputs.skip != 'true'
+      run: |
+        echo "TAGS=${{ github.ref_name }}" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Determine if the latest tag should be pushed to Docker Hub
+      if: steps.check_images.outputs.skip != 'true' && github.ref_name == github.event.repository.default_branch
+      run: |
+        echo "TAGS=${TAGS} latest" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Log in to Docker Hub
+      if: steps.check_images.outputs.skip != 'true'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ inputs.dockerhub_username }}
+        password: ${{ inputs.dockerhub_token }}
+
+    - name: Create and push manifest to Docker Hub
+      if: steps.check_images.outputs.skip != 'true'
+      env:
+        DOCKER_CLI_EXPERIMENTAL: enabled
+        IMAGES_JSON: ${{ inputs.manifest_images }}
+      run: |
+        for TAG in $TAGS; do
+          echo "Creating manifest for tag: $TAG"
+          CREATE_CMD="docker manifest create $IMAGE_REPO:$TAG"
+          for IMAGE in $(echo "$IMAGES_JSON" | jq -r '.[]'); do
+            CREATE_CMD="$CREATE_CMD --amend $IMAGE"
+          done
+          eval $CREATE_CMD
+          docker manifest push $IMAGE_REPO:$TAG
+        done
+      shell: bash
