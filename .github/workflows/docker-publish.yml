@@ -73,7 +73,7 @@ jobs:
     steps:
       - name: Publish image to Docker Hub
         id: publish
-        uses: drupalforge/docker_publish_action/platform@main
+        uses: drupalforge/docker_publish_action@main
         env:
           NETWORK: ${{ job.services.mysql.network }}
         with:
