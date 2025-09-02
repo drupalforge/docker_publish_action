@@ -24,7 +24,7 @@ inputs:
     description: 'Previously cached files hash for comparison.'
     required: false
   build_platform:
-    description: 'Target platform for the build. Defaults to linux/amd64.
+    description: 'Target platform for the build. Defaults to linux/amd64.'
     required: false
 runs:
   using: "composite"
