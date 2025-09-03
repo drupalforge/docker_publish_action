@@ -59,7 +59,7 @@ runs:
         driver: cloud
         endpoint: "${{ inputs.dockerhub_username }}/github"
 
-    - name: Fallback to docker-container builder if cloud did not succeed
+    - name: Fall back to docker-container builder if cloud did not succeed
       if: steps.buildx_cloud.outcome != 'success'
       uses: docker/setup-buildx-action@v3
 
@@ -76,15 +76,31 @@ runs:
         file: ./docker_publish_action/Dockerfile
         platforms: ${{ inputs.build_platform || 'linux/amd64' }}
         build-args: |
-          DP_APP_ID=$IMAGE_REPO
-          DP_AI_VIRTUAL_KEY=${{ inputs.dp_ai_virtual_key || null }}
+          APP_ROOT=/var/www/html
+          APACHE_RUN_USER=www
+          APACHE_RUN_GROUP=www
         push: false
         load: true
 
     - name: Run init.sh in container with MySQL
       id: post_build_init
       run: |
-        WEBSERVER=$(docker run -d --network ${NETWORK:-bridge} ${{ steps.build_image.outputs.imageid }} tail -f /dev/null)
+        WEBSERVER=$(docker run -d --network ${NETWORK:-bridge} \
+          -e DP_APP_ID=$IMAGE_REPO \
+          -e DP_AI_VIRTUAL_KEY=${{ inputs.dp_ai_virtual_key || null }} \
+          -e APP_ROOT="/var/www/html" \
+          -e WEB_ROOT="/var/www/html/web" \
+          -e APACHE_RUN_USER="www" \
+          -e APACHE_RUN_GROUP="www" \
+          -e CODES_ENABLE="no" \
+          -e DB_HOST="mysql" \
+          -e DB_PORT="3306" \
+          -e DB_ROOT_PASSWORD="root" \
+          -e DB_NAME="drupaldb" \
+          -e DB_USER="user" \
+          -e DB_PASSWORD="password" \
+          -e DB_DRIVER="mysql" \
+          ${{ steps.build_image.outputs.imageid }})
         echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
         echo "INSTALL DRUPAL"
         docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/init.sh'
