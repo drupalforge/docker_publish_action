@@ -11,7 +11,7 @@ on:
         required: false
         type: string
       files_to_hash:
-        description: 'List of files to check for changes (space or newline separated). Defaults to composer.lock if not provided.'
+        description: 'List of files to check for changes (space or newline separated). Relative paths are assumed to be in app root. Defaults to composer.lock if not provided.'
         required: false
         type: string
     secrets:
@@ -47,6 +47,7 @@ jobs:
         shell: bash
     outputs:
       cached_hash: ${{ steps.read_cached_hash.outputs.cached_hash || null }}
+      matched_key: ${{ steps.cache.outputs.cache-matched-key || null }}
 
   build-and-push:
     needs: retrieve-files-hash
@@ -127,12 +128,25 @@ jobs:
           dockerhub_token: ${{ secrets.dockerhub_token }}
           image_repo: ${{ inputs.image_repo || github.repository }}
           manifest_images: ${{ steps.images.outputs.images }}
-
   store-files-hash:
-    needs: build-and-push
+    needs:
+      - retrieve-files-hash
+      - build-and-push
     if: needs.build-and-push.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Delete old cached hash
+        if: needs.retrieve-files-hash.outputs.matched_key != ''
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh cache delete ${{ needs.retrieve-files-hash.outputs.matched_key }}
+        shell: bash
+
       - name: Save new hash to cache file
         id: save_hash_file
         run: |

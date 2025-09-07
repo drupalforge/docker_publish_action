@@ -18,7 +18,7 @@ inputs:
     description: 'Docker Hub image repository'
     required: false
   files_to_hash:
-    description: 'List of files to check for changes (space or newline separated). Defaults to composer.lock if not provided.'
+    description: 'List of files to check for changes (space or newline separated). Relative paths are assumed to be in app root. Defaults to composer.lock if not provided.'
     required: false
   cached_hash:
     description: 'Previously cached files hash for comparison.'
@@ -114,28 +114,33 @@ runs:
         echo "HASH FILES"
         APP_ROOT=$(docker exec $WEBSERVER bash -c 'echo $APP_ROOT')
         HASH=""
-        if [ -n "$FILES_TO_HASH" ]; then
-          echo "Hashing $FILES_TO_HASH in $APP_ROOT to check for changes."
+        if [ -n $FILES_TO_HASH ]; then
           EXISTING_FILES=""
           # Use eval and set to handle quoted filenames with spaces
           eval set -- $FILES_TO_HASH
           for f; do
-            # Always check relative to $APP_ROOT
-            if docker exec $WEBSERVER bash -c "cd \$APP_ROOT && [ -f \"$f\" ]"; then
-              EXISTING_FILES="${EXISTING_FILES}${f}\n"
+            if [ ${f:0:1} != / ]; then
+              # Check relative to $APP_ROOT
+              f=$APP_ROOT/$f
+            fi
+            echo "Hashing $f to check for changes."
+            if docker exec $WEBSERVER bash -c "test -f '$f'"; then
+              if [ -n $EXISTING_FILES ]; then
+                f=$'\n'$f
+              fi
+              EXISTING_FILES=$EXISTING_FILES$f
             fi
           done
-          if [ -n "$EXISTING_FILES" ]; then
-            EXISTING_FILES=$(printf "%b" "$EXISTING_FILES" | sort)
-            while IFS= read -r f; do
-              [ -z "$f" ] && continue
-              FILE_HASH=$(docker exec $WEBSERVER bash -c "cd \$APP_ROOT && sha256sum \"$f\" | awk '{print \$1}'")
-              if [ -z "$HASH" ]; then
-                HASH="$FILE_HASH"
+          if [ -n $EXISTING_FILES ]; then
+            EXISTING_FILES=$(echo $EXISTING_FILES | sort)
+            for f in $EXISTING_FILES; do
+              FILE_HASH=$(docker exec $WEBSERVER bash -c "sha256sum \"$f\" | awk '{print \$1}'")
+              if [ -z $HASH ]; then
+                HASH=$FILE_HASH
               else
-                HASH=$(printf "%s%s" "$HASH" "$FILE_HASH" | sha256sum | awk '{print $1}')
+                HASH=$(printf "%s%s" $HASH $FILE_HASH | sha256sum | awk '{print $1}')
               fi
-            done <<< "$EXISTING_FILES"
+            done
           fi
         fi
         echo "hash=$HASH" >> $GITHUB_OUTPUT
@@ -149,7 +154,7 @@ runs:
         HASH: ${{ steps.hash_files.outputs.hash }}
       run: |
         echo "CHECK FOR CHANGES"
-        if [ -n "${CACHED_HASH+x}" ] && [ "$CACHED_HASH" == "$HASH" ]; then
+        if [ -n ${CACHED_HASH+x} ] && [ $CACHED_HASH == $HASH ]; then
           echo "Hash unchanged, skipping rest of the action."
           echo "skip=true" >> $GITHUB_OUTPUT
         fi
