@@ -29,7 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Restore files hash cache
-        if: github.event_name != 'push'
         id: cache
         uses: actions/cache/restore@v4
         with:
@@ -39,7 +38,7 @@ jobs:
             files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}
 
       - name: Read cached hash value
-        if: steps.cache.outputs.cache-matched-key
+        if: github.event_name != 'push' && steps.cache.outputs.cache-matched-key
         id: read_cached_hash
         run: |
           echo "cached_hash=$(cat .files_hash.cache)" >> $GITHUB_OUTPUT
@@ -128,6 +127,7 @@ jobs:
           dockerhub_token: ${{ secrets.dockerhub_token }}
           image_repo: ${{ inputs.image_repo || github.repository }}
           manifest_images: ${{ steps.images.outputs.images }}
+
   store-files-hash:
     needs:
       - retrieve-files-hash
@@ -139,7 +139,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Delete old cached hash
-        if: needs.retrieve-files-hash.outputs.matched_key != ''
+        if: needs.retrieve-files-hash.outputs.matched_key
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
