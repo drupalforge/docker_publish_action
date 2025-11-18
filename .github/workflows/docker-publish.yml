@@ -18,6 +18,9 @@ on:
       dockerhub_token:
         description: 'Docker Hub token'
         required: true
+      openai_key:
+        description: 'OpenAI API Key'
+        required: true
       dp_ai_virtual_key:
         description: 'DevPanel AI Virtual Key'
         required: false
@@ -73,12 +76,13 @@ jobs:
     steps:
       - name: Publish image to Docker Hub
         id: publish
-        uses: drupalforge/docker_publish_action@main
+        uses: drupalforge/docker_publish_action@dries_note_vienna_2025
         env:
           NETWORK: ${{ job.services.mysql.network }}
         with:
           dockerhub_username: ${{ inputs.dockerhub_username }}
           dockerhub_token: ${{ secrets.dockerhub_token }}
+          openai_key: ${{ secrets.openai_key }}
           dp_ai_virtual_key: ${{ secrets.dp_ai_virtual_key || null }}
           image_repo: ${{ inputs.image_repo || github.repository }}
           files_to_hash: ${{ inputs.files_to_hash || null }}

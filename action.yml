@@ -11,6 +11,9 @@ inputs:
   dockerhub_token:
     description: 'Docker Hub token'
     required: true
+  openai_key:
+    description: 'OpenAI API Key'
+    required: true
   dp_ai_virtual_key:
     description: 'DevPanel AI Virtual Key'
     required: false
@@ -86,7 +89,9 @@ runs:
       id: post_build_init
       run: |
         WEBSERVER=$(docker run -d --network ${NETWORK:-bridge} \
+          --add-host=milvus:127.0.0.1 \
           -e DP_APP_ID=$IMAGE_REPO \
+          -e OPENAI_KEY=${{ inputs.openai_key }} \
           -e DP_AI_VIRTUAL_KEY=${{ inputs.dp_ai_virtual_key || null }} \
           -e APP_ROOT="/var/www/html" \
           -e WEB_ROOT="/var/www/html/web" \
