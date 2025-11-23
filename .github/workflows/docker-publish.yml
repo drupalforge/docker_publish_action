@@ -104,6 +104,15 @@ jobs:
         with:
           name: ${{ steps.save_image_id.outputs.arch_safe }}-image_id
           path: ${{ steps.save_image_id.outputs.arch_safe }}-image_id.json
+
+      - name: Upload Milvus logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milvus-logs
+          path: |
+            /var/log/milvus.out.log
+            /var/log/milvus.err.log
     outputs:
       hash: ${{ steps.publish.outputs.hash }}
       skip: ${{ steps.publish.outputs.skip }}
