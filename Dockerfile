@@ -10,7 +10,7 @@ ARG APACHE_RUN_USER="www"
 ARG APACHE_RUN_GROUP="www"
 ARG APACHE_COMMAND
 
-# Copy application code
+# Copy application code from default context
 COPY . /app/
 
 # PREPARE DIR FOR INSTALL
@@ -23,12 +23,12 @@ RUN sudo chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP $APP_ROOT
 RUN git config --global --add safe.directory $APP_ROOT
 
 # Install supervisor and dependencies
-RUN apt-get update && apt-get install -y \
+RUN sudo apt-get update && sudo apt-get install -y \
     supervisor \
     python3-pip \
     curl \
-    && pip3 install supervisord-dependent-startup --break-system-packages \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && sudo pip3 install supervisord-dependent-startup --break-system-packages \
+    && sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
 
 # INSTALL CUSTOM PACKAGE (PHP extensions, project-specific tasks, etc.)
 RUN $APP_ROOT/.devpanel/custom_package_installer.sh
@@ -36,69 +36,70 @@ RUN $APP_ROOT/.devpanel/custom_package_installer.sh
 # Install Milvus stack components
 
 # Install Milvus dependencies
-RUN apt-get update && apt-get install -y \
+RUN sudo apt-get update && sudo apt-get install -y \
     libaio1 \
     libopenblas0 \
     libgomp1 \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
 
 # Copy entire Milvus directory structure to preserve paths
 COPY --from=milvus /milvus /milvus
 
 # Create Milvus data directory with proper permissions
-RUN mkdir -p /var/lib/milvus && \
-    chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /var/lib/milvus && \
-    chmod +x /milvus/bin/milvus
+RUN sudo mkdir -p /var/lib/milvus && \
+    sudo chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /var/lib/milvus && \
+    sudo chmod +x /milvus/bin/milvus
 
 # Update library path for Milvus libraries
-RUN echo "/milvus/lib" > /etc/ld.so.conf.d/milvus.conf && ldconfig
+RUN echo "/milvus/lib" | sudo tee /etc/ld.so.conf.d/milvus.conf && sudo ldconfig
 
 # Copy etcd binaries
 COPY --from=etcd /usr/local/bin/etcd /usr/local/bin/etcd
 COPY --from=etcd /usr/local/bin/etcdctl /usr/local/bin/etcdctl
 
 # Create etcd data directory
-RUN mkdir -p /etcd && chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /etcd
+RUN sudo mkdir -p /etcd && sudo chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /etcd
 
 # Copy MinIO binary from the correct location
 COPY --from=minio /opt/bin/minio /usr/bin/minio
 
 # Create MinIO data directory
-RUN mkdir -p /minio_data && chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /minio_data
+RUN sudo mkdir -p /minio_data && sudo chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /minio_data
 
 # Copy Attu Node.js application
 COPY --from=attu /app /app
 COPY --from=attu /usr/local/bin/node /usr/local/bin/node
 COPY --from=attu /usr/local/lib/node_modules /usr/local/lib/node_modules
 
+# Install yarn for Attu
+RUN sudo apt-get update && sudo apt-get install -y yarnpkg && \
+    sudo ln -sf /usr/bin/yarnpkg /usr/bin/yarn && \
+    sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
+
+# Enable Apache proxy modules and configure Attu proxy
+RUN sudo a2enmod proxy proxy_http
+COPY --from=docker_publish_action attu-proxy.conf /etc/apache2/conf-available/attu-proxy.conf
+RUN sudo a2enconf attu-proxy
+
 # Fix permissions for attu to write env-config.js
-RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /app/build
+RUN sudo chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /app/build
 
-# Generate apache.conf from build arg
-RUN mkdir -p /etc/supervisor/conf.d && \
-    printf "[program:apache2]\ncommand=%s\nuser=%%(ENV_APACHE_RUN_USER)s\nautostart=true\nautorestart=true\nstdout_logfile=/var/log/apache2/supervisor.log\nstderr_logfile=/var/log/apache2/supervisor_err.log\n" "$APACHE_COMMAND" > /etc/supervisor/conf.d/apache.conf
+# Copy supervisor configs
+COPY --from=docker_publish_action supervisor/*.conf /etc/supervisor/
+COPY --from=docker_publish_action supervisor/conf.d/* /etc/supervisor/conf.d/
 
-# Copy Supervisor configs for all services
-COPY .ddev/web-build/supervisor/attu.conf /etc/supervisor/conf.d/attu.conf
-COPY .ddev/web-build/supervisor/dependent-startup.conf /etc/supervisor/conf.d/dependent-startup.conf
-COPY .ddev/web-build/supervisor/etcd.conf /etc/supervisor/conf.d/etcd.conf
-COPY .ddev/web-build/supervisor/milvus.conf /etc/supervisor/conf.d/milvus.conf
-COPY .ddev/web-build/supervisor/minio.conf /etc/supervisor/conf.d/minio.conf
+# Generate apache supervisor config from template
+RUN sudo sed -i "s|__APACHE_COMMAND__|${APACHE_COMMAND}|g" /etc/supervisor/conf.d/apache.conf.template && \
+    sudo mv /etc/supervisor/conf.d/apache.conf.template /etc/supervisor/conf.d/apache.conf
 
 # Create data directories and set ownership for Milvus services
-RUN mkdir -p /etcd /milvus_data /var/lib/milvus /minio_data && \
-    chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /etcd /milvus_data /var/lib/milvus /minio_data
+RUN sudo mkdir -p /etcd /milvus_data /var/lib/milvus /minio_data && \
+    sudo chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /etcd /milvus_data /var/lib/milvus /minio_data
 
 # Create supervisor log directory
-RUN mkdir -p /var/log/supervisor
+RUN sudo mkdir -p /var/log/supervisor
 
-# Create entrypoint script to add hostnames at runtime
-RUN printf '#!/bin/bash\nset -e\n# Modify /etc/hosts as root\nsed -i "/localhost/ s/\$/  etcd minio milvus attu/" /etc/hosts\n# Execute the command\nexec "\$@"\n' > /entrypoint.sh && chmod +x /entrypoint.sh
-
-# Switch to root for entrypoint to modify /etc/hosts
+# Switch to root to run supervisord (it will handle user switching for individual services)
 USER root
 
-ENTRYPOINT ["/entrypoint.sh"]
-
-# Start Supervisor as the main process (supervisord will handle switching users)
-CMD ["supervisord", "-n"]
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

@@ -37,11 +37,22 @@ runs:
       with:
         path: app
 
+    - name: Check if action repo already checked out
+      id: check_action_repo
+      run: |
+        if [ -d "docker_publish_action" ]; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
+
     - name: Check out Dockerfile
+      if: steps.check_action_repo.outputs.exists != 'true'
       uses: actions/checkout@v4
       with:
         repository: drupalforge/docker_publish_action
-        ref: develop
+        ref: ${{ github.action_ref }}
         path: docker_publish_action
 
     - name: Get base image digest
@@ -108,6 +119,8 @@ runs:
       uses: docker/build-push-action@v6
       with:
         context: ./app
+        build-contexts: |
+          docker_publish_action=./docker_publish_action
         file: ./docker_publish_action/Dockerfile
         platforms: ${{ inputs.build_platform || 'linux/amd64' }}
         build-args: |
@@ -123,6 +136,9 @@ runs:
       run: |
         WEBSERVER=$(docker run -d --network ${NETWORK:-bridge} \
           --add-host=milvus:127.0.0.1 \
+          --add-host=etcd:127.0.0.1 \
+          --add-host=minio:127.0.0.1 \
+          --add-host=attu:127.0.0.1 \
           -e DP_APP_ID=$IMAGE_REPO \
           -e OPENAI_KEY=${{ inputs.openai_key }} \
           -e DP_AI_VIRTUAL_KEY=${{ inputs.dp_ai_virtual_key || null }} \
@@ -140,6 +156,18 @@ runs:
           -e DB_DRIVER="mysql" \
           ${{ steps.build_image.outputs.imageid }})
         echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
+        echo "DEBUG: Show container logs from entrypoint"
+        docker logs $WEBSERVER 2>&1 | tail -50
+        echo "DEBUG: Check if supervisord is running"
+        docker exec $WEBSERVER ps aux | grep supervisor || echo "No supervisor process found"
+        echo "DEBUG: Check supervisor status"
+        docker exec $WEBSERVER supervisorctl status || echo "supervisorctl failed"
+        echo "DEBUG: Show supervisord log if it exists"
+        docker exec $WEBSERVER cat /var/log/supervisor/supervisord.log 2>/dev/null || echo "No supervisord.log found"
+        echo "DEBUG: List /etc/supervisor/conf.d/"
+        docker exec $WEBSERVER ls -la /etc/supervisor/conf.d/
+        echo "DEBUG: Check etcd.conf user directive"
+        docker exec $WEBSERVER cat /etc/supervisor/conf.d/etcd.conf
         echo "WAIT FOR SERVICES TO BE HEALTHY"
         docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/wait-for-services.sh'
         echo "INSTALL DRUPAL"

@@ -1,0 +1,6 @@
+[program:apache2]
+command=__APACHE_COMMAND__
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/apache2/supervisor.log
+stderr_logfile=/var/log/apache2/supervisor_err.log
