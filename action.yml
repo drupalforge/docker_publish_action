@@ -44,6 +44,38 @@ runs:
         ref: develop
         path: docker_publish_action
 
+    - name: Get base image digest
+      id: base_image_digest
+      run: |
+        docker pull --platform=${{ inputs.build_platform || 'linux/amd64' }} devpanel/php:8.3-base-ai
+        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' devpanel/php:8.3-base-ai | cut -d'@' -f2)
+        echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Cache apache command
+      id: cache_apache_cmd
+      uses: actions/cache@v4
+      with:
+        path: .apache-cmd-cache
+        key: apache-cmd-${{ steps.base_image_digest.outputs.digest }}
+
+    - name: Get Apache startup command from base image
+      if: steps.cache_apache_cmd.outputs.cache-hit != 'true'
+      id: get_apache_cmd
+      run: |
+        CMD=$(docker inspect --format='{{json .Config.Cmd}}' devpanel/php:8.3-base-ai | jq -r 'join(" ")')
+        echo "$CMD" > .apache-cmd-cache
+        echo "command=$CMD" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Load cached Apache command
+      if: steps.cache_apache_cmd.outputs.cache-hit == 'true'
+      id: load_apache_cmd
+      run: |
+        CMD=$(cat .apache-cmd-cache)
+        echo "command=$CMD" >> $GITHUB_OUTPUT
+      shell: bash
+
     - name: Log in to Docker Hub
       uses: docker/login-action@v3
       with:
@@ -82,6 +114,7 @@ runs:
           APP_ROOT=/var/www/html
           APACHE_RUN_USER=www
           APACHE_RUN_GROUP=www
+          APACHE_COMMAND=${{ steps.get_apache_cmd.outputs.command || steps.load_apache_cmd.outputs.command }}
         push: false
         load: true
 
@@ -107,6 +140,8 @@ runs:
           -e DB_DRIVER="mysql" \
           ${{ steps.build_image.outputs.imageid }})
         echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
+        echo "WAIT FOR SERVICES TO BE HEALTHY"
+        docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/wait-for-services.sh'
         echo "INSTALL DRUPAL"
         docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/init.sh'
       shell: bash
