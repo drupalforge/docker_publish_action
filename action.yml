@@ -130,6 +130,8 @@ runs:
           APACHE_COMMAND=${{ steps.get_apache_cmd.outputs.command || steps.load_apache_cmd.outputs.command }}
         push: false
         load: true
+        cache-from: type=registry,ref=${{ env.IMAGE_REPO }}:buildcache-${{ github.ref_name }}
+        cache-to: type=registry,ref=${{ env.IMAGE_REPO }}:buildcache-${{ github.ref_name }},mode=max
 
     - name: Run init.sh in container with MySQL
       id: post_build_init
