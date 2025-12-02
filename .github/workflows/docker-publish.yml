@@ -74,20 +74,11 @@ jobs:
         arch:
           - linux/amd64
     steps:
-      - name: Extract action ref from workflow ref
-        id: action_ref
-        run: |
-          ACTION_REF="${{ github.workflow_ref }}"
-          ACTION_REF="${ACTION_REF#*@}"
-          echo "ref=$ACTION_REF" >> $GITHUB_OUTPUT
-          echo "Using action ref: $ACTION_REF"
-        shell: bash
-      
       - name: Check out action repository
         uses: actions/checkout@v4
         with:
           repository: drupalforge/docker_publish_action
-          ref: ${{ steps.action_ref.outputs.ref }}
+          ref: dries_note_vienna_2025
           path: docker_publish_action
       
       - name: Publish image to Docker Hub
