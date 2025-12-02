@@ -148,6 +148,7 @@ runs:
           -e WEB_ROOT="/var/www/html/web" \
           -e APACHE_RUN_USER="www" \
           -e APACHE_RUN_GROUP="www" \
+          -e DP_HOSTNAME="localhost" \
           -e CODES_ENABLE="no" \
           -e DB_HOST="mysql" \
           -e DB_PORT="3306" \
