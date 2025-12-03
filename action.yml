@@ -55,35 +55,15 @@ runs:
         ref: ${{ github.action_ref }}
         path: docker_publish_action
 
-    - name: Get base image digest
-      id: base_image_digest
+    - name: Get Apache command from base image
+      id: base_image_info
       run: |
-        docker pull --platform=${{ inputs.build_platform || 'linux/amd64' }} devpanel/php:8.3-base-ai
-        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' devpanel/php:8.3-base-ai | cut -d'@' -f2)
-        echo "digest=$DIGEST" >> $GITHUB_OUTPUT
-      shell: bash
-
-    - name: Cache apache command
-      id: cache_apache_cmd
-      uses: actions/cache@v4
-      with:
-        path: .apache-cmd-cache
-        key: apache-cmd-${{ steps.base_image_digest.outputs.digest }}
-
-    - name: Get Apache startup command from base image
-      if: steps.cache_apache_cmd.outputs.cache-hit != 'true'
-      id: get_apache_cmd
-      run: |
-        CMD=$(docker inspect --format='{{json .Config.Cmd}}' devpanel/php:8.3-base-ai | jq -r 'join(" ")')
-        echo "$CMD" > .apache-cmd-cache
-        echo "command=$CMD" >> $GITHUB_OUTPUT
-      shell: bash
-
-    - name: Load cached Apache command
-      if: steps.cache_apache_cmd.outputs.cache-hit == 'true'
-      id: load_apache_cmd
-      run: |
-        CMD=$(cat .apache-cmd-cache)
+        BASE_IMAGE=$(grep '^FROM ' docker_publish_action/Dockerfile | grep -v ' AS ' | awk '{print $2}')
+        # Try to inspect without pulling first (might already be cached)
+        if ! docker inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+          docker pull --quiet --platform=${{ inputs.build_platform || 'linux/amd64' }} "$BASE_IMAGE"
+        fi
+        CMD=$(docker inspect --format='{{json .Config.Cmd}}' "$BASE_IMAGE" | jq -r 'join(" ")')
         echo "command=$CMD" >> $GITHUB_OUTPUT
       shell: bash
 
@@ -117,6 +97,8 @@ runs:
     - name: Build image (no push, load to local Docker)
       id: build_image
       uses: docker/build-push-action@v6
+      env:
+        BUILDKIT_PROGRESS: plain
       with:
         context: ./app
         build-contexts: |
@@ -127,7 +109,7 @@ runs:
           APP_ROOT=/var/www/html
           APACHE_RUN_USER=www
           APACHE_RUN_GROUP=www
-          APACHE_COMMAND=${{ steps.get_apache_cmd.outputs.command || steps.load_apache_cmd.outputs.command }}
+          APACHE_COMMAND=${{ steps.base_image_info.outputs.command }}
         push: false
         load: true
         cache-from: type=registry,ref=${{ env.IMAGE_REPO }}:buildcache-${{ github.ref_name }}
@@ -136,7 +118,7 @@ runs:
     - name: Run init.sh in container with MySQL
       id: post_build_init
       run: |
-        WEBSERVER=$(docker run -d --network ${NETWORK:-bridge} \
+        WEBSERVER=$(docker run -d --quiet --network ${NETWORK:-bridge} \
           --add-host=milvus:127.0.0.1 \
           --add-host=etcd:127.0.0.1 \
           --add-host=minio:127.0.0.1 \
@@ -244,7 +226,7 @@ runs:
       id: push_image
       run: |
         docker commit $WEBSERVER $IMAGE_REPO:${{ github.ref_name }}
-        docker push $IMAGE_REPO:${{ github.ref_name }}
+        docker push --quiet $IMAGE_REPO:${{ github.ref_name }}
         IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_REPO:${{ github.ref_name }})
         echo "image=$IMAGE" >> $GITHUB_OUTPUT
       shell: bash
