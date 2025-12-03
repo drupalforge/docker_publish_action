@@ -10,6 +10,11 @@ ARG APACHE_RUN_USER="www"
 ARG APACHE_RUN_GROUP="www"
 ARG APACHE_COMMAND
 
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Suppress dpkg progress output
+RUN echo 'Dpkg::Use-Pty "0";' | sudo tee /etc/apt/apt.conf.d/00usepty
+
 # Copy application code from default context
 COPY . /app/
 
@@ -23,12 +28,11 @@ RUN sudo chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP $APP_ROOT
 RUN git config --global --add safe.directory $APP_ROOT
 
 # Install supervisor and dependencies
-RUN sudo apt-get update && sudo apt-get install -y \
+RUN sudo apt-get update -qq && sudo apt-get install -y -qq \
     supervisor \
     python3-pip \
     curl \
-    && sudo pip3 install supervisord-dependent-startup --break-system-packages \
-    && sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
+    && sudo pip3 install supervisord-dependent-startup --break-system-packages
 
 # INSTALL CUSTOM PACKAGE (PHP extensions, project-specific tasks, etc.)
 RUN $APP_ROOT/.devpanel/custom_package_installer.sh
@@ -36,11 +40,10 @@ RUN $APP_ROOT/.devpanel/custom_package_installer.sh
 # Install Milvus stack components
 
 # Install Milvus dependencies
-RUN sudo apt-get update && sudo apt-get install -y \
+RUN sudo apt-get update -qq && sudo apt-get install -y -qq \
     libaio1 \
     libopenblas0 \
-    libgomp1 \
-    && sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
+    libgomp1
 
 # Copy entire Milvus directory structure to preserve paths
 COPY --from=milvus /milvus /milvus
@@ -72,9 +75,8 @@ COPY --from=attu /usr/local/bin/node /usr/local/bin/node
 COPY --from=attu /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 # Install yarn for Attu
-RUN sudo apt-get update && sudo apt-get install -y yarnpkg && \
-    sudo ln -sf /usr/bin/yarnpkg /usr/bin/yarn && \
-    sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
+RUN sudo apt-get update -qq && sudo apt-get install -y -qq yarnpkg && \
+    sudo ln -sf /usr/bin/yarnpkg /usr/bin/yarn
 
 # Enable Apache proxy modules and configure Attu proxy
 RUN sudo a2enmod proxy proxy_http
@@ -98,6 +100,9 @@ RUN sudo mkdir -p /etcd /milvus_data /var/lib/milvus /minio_data && \
 
 # Create supervisor log directory
 RUN sudo mkdir -p /var/log/supervisor
+
+# Clean up apt cache and remove dpkg configuration used only for build
+RUN sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/* && sudo rm -f /etc/apt/apt.conf.d/00usepty
 
 # Switch to root to run supervisord (it will handle user switching for individual services)
 USER root

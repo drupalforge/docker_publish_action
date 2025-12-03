@@ -112,14 +112,29 @@ jobs:
           name: ${{ steps.save_image_id.outputs.arch_safe }}-image_id
           path: ${{ steps.save_image_id.outputs.arch_safe }}-image_id.json
 
-      - name: Upload Milvus logs
+      - name: Copy service logs from container
+        if: always()
+        env:
+          WEBSERVER: ${{ env.WEBSERVER }}
+        run: |
+          mkdir -p ./service-logs
+          docker cp $WEBSERVER:/var/log/milvus.out.log ./service-logs/ 2>/dev/null || echo "No milvus.out.log"
+          docker cp $WEBSERVER:/var/log/milvus.err.log ./service-logs/ 2>/dev/null || echo "No milvus.err.log"
+          docker cp $WEBSERVER:/var/log/attu.out.log ./service-logs/ 2>/dev/null || echo "No attu.out.log"
+          docker cp $WEBSERVER:/var/log/attu.err.log ./service-logs/ 2>/dev/null || echo "No attu.err.log"
+          docker cp $WEBSERVER:/var/log/etcd.out.log ./service-logs/ 2>/dev/null || echo "No etcd.out.log"
+          docker cp $WEBSERVER:/var/log/etcd.err.log ./service-logs/ 2>/dev/null || echo "No etcd.err.log"
+          docker cp $WEBSERVER:/var/log/minio.out.log ./service-logs/ 2>/dev/null || echo "No minio.out.log"
+          docker cp $WEBSERVER:/var/log/minio.err.log ./service-logs/ 2>/dev/null || echo "No minio.err.log"
+          docker cp $WEBSERVER:/var/log/supervisor/supervisord.log ./service-logs/ 2>/dev/null || echo "No supervisord.log"
+          ls -la ./service-logs/
+
+      - name: Upload service logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: milvus-logs
-          path: |
-            /var/log/milvus.out.log
-            /var/log/milvus.err.log
+          name: service-logs
+          path: ./service-logs/
     outputs:
       hash: ${{ steps.publish.outputs.hash }}
       skip: ${{ steps.publish.outputs.skip }}
