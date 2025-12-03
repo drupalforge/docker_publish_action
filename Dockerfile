@@ -79,7 +79,7 @@ RUN sudo apt-get update -qq && sudo apt-get install -y -qq yarnpkg && \
     sudo ln -sf /usr/bin/yarnpkg /usr/bin/yarn
 
 # Enable Apache proxy modules and configure Attu proxy
-RUN sudo a2enmod proxy proxy_http
+RUN sudo a2enmod proxy proxy_http proxy_wstunnel headers substitute
 COPY --from=docker_publish_action attu-proxy.conf /etc/apache2/conf-available/attu-proxy.conf
 RUN sudo a2enconf attu-proxy
 
