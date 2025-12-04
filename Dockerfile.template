@@ -1,0 +1,105 @@
+FROM zilliz/attu:v2.3.10 AS attu
+FROM quay.io/coreos/etcd:v3.5.5 AS etcd
+FROM milvusdb/milvus:v2.4.1 AS milvus
+FROM minio/minio:RELEASE.2023-03-20T20-16-18Z AS minio
+
+FROM devpanel/php:8.3-base-ai
+
+ARG APP_ROOT=/var/www/html
+ARG APACHE_RUN_USER=www
+ARG APACHE_RUN_GROUP=www
+ARG DEBIAN_FRONTEND=noninteractive
+
+ENV APP_ROOT=${APP_ROOT}
+ENV APACHE_RUN_USER=${APACHE_RUN_USER}
+ENV APACHE_RUN_GROUP=${APACHE_RUN_GROUP}
+
+# Copy Attu Node.js application
+COPY --from=attu /app /app
+COPY --from=attu /usr/local/bin/node /usr/local/bin/node
+COPY --from=attu /usr/local/lib/node_modules /usr/local/lib/node_modules
+# Copy etcd binaries
+COPY --from=etcd /usr/local/bin/etcd /usr/local/bin/etcd
+COPY --from=etcd /usr/local/bin/etcdctl /usr/local/bin/etcdctl
+# Copy entire Milvus directory structure to preserve paths
+COPY --from=milvus /milvus /milvus
+# Copy MinIO binary
+COPY --from=minio /opt/bin/minio /usr/bin/minio
+
+USER root
+
+# SET UP GIT
+RUN git config --global --add safe.directory $APP_ROOT
+
+# Copy application code from default context
+RUN rm -rf $APP_ROOT
+COPY . $APP_ROOT/
+RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP $APP_ROOT
+
+# Suppress dpkg progress output
+RUN echo 'Dpkg::Use-Pty "0";' > /etc/apt/apt.conf.d/00usepty
+
+# Update apt repository information
+RUN apt-get update -qq
+
+# INSTALL CUSTOM PACKAGES (PHP extensions, project-specific tasks, etc.)
+RUN $APP_ROOT/.devpanel/custom_package_installer.sh
+
+# Install supervisor and dependencies
+RUN apt-get install -y -qq supervisor python3-pip curl && \
+    pip3 install supervisord-dependent-startup --break-system-packages
+
+# Install Milvus dependencies
+RUN apt-get install -y -qq \
+    libaio1 \
+    libopenblas0 \
+    libgomp1
+
+# Install yarn for Attu
+RUN apt-get install -y -qq yarnpkg && \
+    ln -sf /usr/bin/yarnpkg /usr/bin/yarn
+
+# Clean up apt cache and remove dpkg configuration used only for build
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* && rm -f /etc/apt/apt.conf.d/00usepty
+
+# Create Milvus data directory with proper permissions
+RUN mkdir -p /var/lib/milvus && \
+    chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /var/lib/milvus && \
+    chmod +x /milvus/bin/milvus
+
+# Update library path for Milvus libraries
+RUN echo "/milvus/lib" > /etc/ld.so.conf.d/milvus.conf && ldconfig
+
+# Create data directories and set ownership for Milvus services
+RUN mkdir -p /etcd /milvus_data /var/lib/milvus /minio_data && \
+    chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /etcd /milvus_data /var/lib/milvus /minio_data
+
+# Create etcd data directory
+RUN mkdir -p /etcd && chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /etcd
+
+# Create MinIO data directory
+RUN  mkdir -p /minio_data && chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /minio_data
+
+# Enable Apache proxy modules and configure Attu proxy
+RUN a2enmod proxy proxy_http proxy_wstunnel headers substitute
+COPY --from=docker_publish_action attu-proxy.conf /etc/apache2/conf-available/attu-proxy.conf
+RUN a2enconf attu-proxy
+
+# Fix permissions for attu to write env-config.js
+RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /app/build
+
+# Copy supervisor configs
+COPY --from=docker_publish_action supervisor/*.conf /etc/supervisor/
+COPY --from=docker_publish_action supervisor/conf.d/* /etc/supervisor/conf.d/
+
+# Create supervisor log directory
+RUN mkdir -p /var/log/supervisor
+
+# Copy and set up entrypoint script
+COPY --from=docker_publish_action entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+
+# CMD will be replaced during build with the base image's CMD
+CMD __BASE_CMD__
