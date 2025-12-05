@@ -132,18 +132,6 @@ runs:
           --env-file docker_publish_action/.env \
           ${{ steps.build_image.outputs.imageid }})
         echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
-        echo "DEBUG: Show container logs from entrypoint"
-        docker logs $WEBSERVER 2>&1 | tail -50
-        echo "DEBUG: Check if supervisord is running"
-        docker exec $WEBSERVER ps aux | grep supervisor || echo "No supervisor process found"
-        echo "DEBUG: Check supervisor status"
-        docker exec $WEBSERVER supervisorctl status || echo "supervisorctl failed"
-        echo "DEBUG: Show supervisord log if it exists"
-        docker exec $WEBSERVER cat /var/log/supervisor/supervisord.log 2>/dev/null || echo "No supervisord.log found"
-        echo "DEBUG: List /etc/supervisor/conf.d/"
-        docker exec $WEBSERVER ls -la /etc/supervisor/conf.d/
-        echo "DEBUG: Check etcd.conf user directive"
-        docker exec $WEBSERVER cat /etc/supervisor/conf.d/etcd.conf
         echo "WAIT FOR SERVICES TO BE HEALTHY"
         docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/wait-for-services.sh'
         echo "INSTALL DRUPAL"
