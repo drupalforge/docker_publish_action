@@ -120,7 +120,7 @@ runs:
       run: |
         # Generate .env from env.template, replacing placeholders with dynamic values
         sed -e "s|__OPENAI_KEY__|${{ inputs.openai_key }}|g" \
-          -e "s|__DP_AI_VIRTUAL_KEY__|${{ inputs.dp_ai_virtual_key || "" }}|g" \
+          -e "s|__DP_AI_VIRTUAL_KEY__|${{ inputs.dp_ai_virtual_key || '' }}|g" \
           -e "s|__DP_APP_ID__|${{ inputs.image_repo || github.repository }}|g" \
           docker_publish_action/.env.template > docker_publish_action/.env
 
