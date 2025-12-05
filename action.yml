@@ -118,27 +118,18 @@ runs:
     - name: Run init.sh in container with MySQL
       id: post_build_init
       run: |
+        # Generate .env from env.template, replacing placeholders with dynamic values
+        sed -e "s|__OPENAI_KEY__|${{ inputs.openai_key }}|g" \
+          -e "s|__DP_AI_VIRTUAL_KEY__|${{ inputs.dp_ai_virtual_key || "" }}|g" \
+          -e "s|__DP_APP_ID__|${{ inputs.image_repo || github.repository }}|g" \
+          docker_publish_action/.env.template > docker_publish_action/.env
+
         WEBSERVER=$(docker run -d --quiet --network ${NETWORK:-bridge} \
           --add-host=milvus:127.0.0.1 \
           --add-host=etcd:127.0.0.1 \
           --add-host=minio:127.0.0.1 \
           --add-host=attu:127.0.0.1 \
-          -e DP_APP_ID=$IMAGE_REPO \
-          -e OPENAI_KEY=${{ inputs.openai_key }} \
-          -e DP_AI_VIRTUAL_KEY=${{ inputs.dp_ai_virtual_key || null }} \
-          -e APP_ROOT="/var/www/html" \
-          -e WEB_ROOT="/var/www/html/web" \
-          -e APACHE_RUN_USER="www" \
-          -e APACHE_RUN_GROUP="www" \
-          -e DP_HOSTNAME="localhost" \
-          -e CODES_ENABLE="no" \
-          -e DB_HOST="mysql" \
-          -e DB_PORT="3306" \
-          -e DB_ROOT_PASSWORD="root" \
-          -e DB_NAME="drupaldb" \
-          -e DB_USER="user" \
-          -e DB_PASSWORD="password" \
-          -e DB_DRIVER="mysql" \
+          --env-file docker_publish_action/.env \
           ${{ steps.build_image.outputs.imageid }})
         echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
         echo "DEBUG: Show container logs from entrypoint"
@@ -219,6 +210,18 @@ runs:
         echo "DUMPS DATABASE + STATIC FILE"
         docker exec $WEBSERVER bash -c '$APP_ROOT/.devpanel/create_quickstart.sh'
         docker exec $WEBSERVER bash -c 'rm $APP_ROOT/.devpanel/dumps/files.tgz'
+      shell: bash
+
+    - name: Cleanup sensitive environment variables
+      if: steps.compare_hash.outputs.skip != 'true'
+      run: |
+        docker exec $WEBSERVER bash -c '
+          if [ -f docker_publish_action/.env ]; then
+            grep -v "^#" docker_publish_action/.env | cut -d= -f1 | while IFS= read -r var; do
+              unset "$var"
+            done
+          fi
+        '
       shell: bash
 
     - name: Commit and push the container state to Docker Hub
