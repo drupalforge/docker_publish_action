@@ -74,23 +74,8 @@ RUN apt-get install -y -qq yarnpkg && \
 # Clean up apt cache and remove dpkg configuration used only for build
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* && rm -f /etc/apt/apt.conf.d/00usepty
 
-# Create Milvus data directory with proper permissions
-RUN mkdir -p /var/lib/milvus && \
-    chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /var/lib/milvus && \
-    chmod +x /milvus/bin/milvus
-
 # Update library path for Milvus libraries
 RUN echo "/milvus/lib" > /etc/ld.so.conf.d/milvus.conf && ldconfig
-
-# Create data directories and set ownership for Milvus services
-RUN mkdir -p /etcd /milvus_data /var/lib/milvus /minio_data && \
-    chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /etcd /milvus_data /var/lib/milvus /minio_data
-
-# Create etcd data directory
-RUN mkdir -p /etcd && chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /etcd
-
-# Create MinIO data directory
-RUN  mkdir -p /minio_data && chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /minio_data
 
 # Enable Apache proxy modules and configure Attu proxy
 RUN a2enmod proxy proxy_http proxy_wstunnel headers substitute

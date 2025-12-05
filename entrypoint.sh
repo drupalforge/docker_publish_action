@@ -18,6 +18,14 @@ for host in etcd minio milvus attu; do
   fi
 done
 
+# Ensure Milvus, Minio, and Etcd volume directories exist and create symlinks
+mkdir -p "$APP_ROOT/.devpanel/milvus/volumes/milvus" \
+         "$APP_ROOT/.devpanel/milvus/volumes/minio" \
+         "$APP_ROOT/.devpanel/milvus/volumes/etcd"
+ln -sf "$APP_ROOT/.devpanel/milvus/volumes/milvus" /var/lib/milvus
+ln -sf "$APP_ROOT/.devpanel/milvus/volumes/minio" /minio_data
+ln -sf "$APP_ROOT/.devpanel/milvus/volumes/etcd" /etcd
+
 # Set Apache command from arguments (either from CMD or docker run override)
 if [ $# -gt 0 ]; then
   export APACHE_COMMAND="$*"
