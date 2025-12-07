@@ -32,6 +32,22 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Check disk space and create swap file (increase memory)
+      if: runner.os == 'Linux'
+      run: |
+        AVAIL=$(df --output=avail / | tail -1)
+        # AVAIL is in KB, 3GB = 3 * 1024 * 1024 KB
+        if [ "$AVAIL" -gt $((3 * 1024 * 1024)) ]; then
+          sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+        else
+          echo "Not enough disk space for swap. Skipping swap creation."
+        fi
+        free -h || true
+      shell: bash
+
     - name: Check out code
       uses: actions/checkout@v4
       with:
@@ -124,7 +140,8 @@ runs:
           -e "s|__DP_APP_ID__|${{ inputs.image_repo || github.repository }}|g" \
           docker_publish_action/.env.template > docker_publish_action/.env
 
-        WEBSERVER=$(docker run -d --quiet --network ${NETWORK:-bridge} \
+        WEBSERVER=$(docker run -dq \
+          --network ${NETWORK:-bridge} \
           --add-host=milvus:127.0.0.1 \
           --add-host=etcd:127.0.0.1 \
           --add-host=minio:127.0.0.1 \
@@ -132,6 +149,7 @@ runs:
           --env-file docker_publish_action/.env \
           ${{ steps.build_image.outputs.imageid }})
         echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
+        docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/custom_package_installer.sh'
         echo "WAIT FOR SERVICES TO BE HEALTHY"
         docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/wait-for-services.sh'
         echo "INSTALL DRUPAL"
@@ -220,6 +238,14 @@ runs:
         docker push --quiet $IMAGE_REPO:${{ github.ref_name }}
         IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_REPO:${{ github.ref_name }})
         echo "image=$IMAGE" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Remove swap file (cleanup)
+      if: always()
+      run: |
+        sudo swapoff /swapfile || true
+        sudo rm -f /swapfile
+        free -h
       shell: bash
 outputs:
   hash:
