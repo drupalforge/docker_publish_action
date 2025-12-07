@@ -89,7 +89,6 @@ ENV APACHE_RUN_GROUP=${APACHE_RUN_GROUP}
 RUN git config --global --add safe.directory $APP_ROOT
 
 # Copy application code from default context
-RUN rm -rf $APP_ROOT
 COPY . $APP_ROOT/
 RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP $APP_ROOT
 

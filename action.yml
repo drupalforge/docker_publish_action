@@ -83,6 +83,11 @@ runs:
         echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
       shell: bash
 
+    - name: Generate .dockerignore in build context
+      run: |
+        sed "s|__APP_ROOT__|/var/www/html|g" docker_publish_action/.dockerignore.template > app/.dockerignore
+      shell: bash
+
     - name: Get CMD from base image and generate Dockerfile
       id: prepare_dockerfile
       run: |
@@ -247,14 +252,6 @@ runs:
         docker push --quiet $IMAGE_REPO:${{ github.ref_name }}
         IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_REPO:${{ github.ref_name }})
         echo "image=$IMAGE" >> $GITHUB_OUTPUT
-      shell: bash
-
-    - name: Remove swap file (cleanup)
-      if: always()
-      run: |
-        sudo swapoff /swapfile || true
-        sudo rm -f /swapfile
-        free -h
       shell: bash
 outputs:
   hash:

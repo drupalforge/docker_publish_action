@@ -1,0 +1,4 @@
+.git
+
+# Ignore everything in /var/www/html from build context
+__APP_ROOT__
