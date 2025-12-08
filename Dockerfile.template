@@ -85,9 +85,6 @@ ENV APP_ROOT=${APP_ROOT}
 ENV APACHE_RUN_USER=${APACHE_RUN_USER}
 ENV APACHE_RUN_GROUP=${APACHE_RUN_GROUP}
 
-# SET UP GIT
-RUN git config --global --add safe.directory $APP_ROOT
-
 # Copy application code from default context
 COPY . $APP_ROOT/
 RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP $APP_ROOT
@@ -96,6 +93,9 @@ RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP $APP_ROOT
 RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /app/build
 
 USER ${USER}
+
+# SET UP GIT
+RUN git config --global --add safe.directory $APP_ROOT
 
 ENTRYPOINT ["sudo", "/entrypoint.sh"]
 
