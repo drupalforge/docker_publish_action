@@ -121,28 +121,6 @@ runs:
         cache-from: type=registry,ref=${{ env.IMAGE_REPO }}:buildcache-${{ github.ref_name }}
         cache-to: type=registry,ref=${{ env.IMAGE_REPO }}:buildcache-${{ github.ref_name }},mode=max
 
-    - name: Docker system prune (cleanup)
-      run: |
-        docker system prune -af --filter "label!=keep"
-        docker builder prune -af
-      shell: bash
-
-    - name: Check disk space and create swap file (increase memory)
-      if: runner.os == 'Linux'
-      run: |
-        AVAIL=$(df --output=avail / | tail -1)
-        # AVAIL is in KB, 3GB = 3 * 1024 * 1024 KB
-        if [ "$AVAIL" -gt $((3 * 1024 * 1024)) ]; then
-          sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-        else
-          echo "Not enough disk space for swap. Skipping swap creation."
-        fi
-        free -h || true
-      shell: bash
-
     - name: Run init.sh in container with MySQL
       id: post_build_init
       run: |
