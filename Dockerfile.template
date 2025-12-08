@@ -58,7 +58,9 @@ COPY --from=milvus /milvus /milvus
 COPY --from=minio /opt/bin/minio /usr/bin/minio
 
 # Update library path for Milvus libraries
-RUN echo "/milvus/lib" > /etc/ld.so.conf.d/milvus.conf && ldconfig
+RUN echo "/milvus/lib" > /etc/ld.so.conf.d/milvus.conf && \
+    ldconfig && \
+    chmod +x /milvus/bin/milvus
 
 # Enable Apache proxy modules and configure Attu proxy
 RUN a2enmod proxy proxy_http proxy_wstunnel headers substitute

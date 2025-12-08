@@ -22,8 +22,8 @@ done
 mkdir -p "$APP_ROOT/.devpanel/milvus/volumes/milvus" \
          "$APP_ROOT/.devpanel/milvus/volumes/minio" \
          "$APP_ROOT/.devpanel/milvus/volumes/etcd"
+chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP "$APP_ROOT/.devpanel/milvus"
 ln -sf "$APP_ROOT/.devpanel/milvus/volumes/milvus" /var/lib/milvus
-ln -sf "$APP_ROOT/.devpanel/milvus/volumes/minio" /minio_data
 ln -sf "$APP_ROOT/.devpanel/milvus/volumes/etcd" /etcd
 
 # Set Apache command from arguments (either from CMD or docker run override)
