@@ -100,3 +100,5 @@ ENTRYPOINT ["sudo", "-E", "/entrypoint.sh"]
 
 # CMD will be replaced during build with the base image's CMD
 CMD __BASE_CMD__
+
+LABEL keep=true

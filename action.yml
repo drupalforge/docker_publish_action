@@ -116,8 +116,6 @@ runs:
           APP_ROOT=/var/www/html
           APACHE_RUN_USER=www
           APACHE_RUN_GROUP=www
-        labels: |
-          keep=true
         push: false
         load: true
         cache-from: type=registry,ref=${{ env.IMAGE_REPO }}:buildcache-${{ github.ref_name }}
