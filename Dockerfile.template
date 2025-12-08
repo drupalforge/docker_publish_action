@@ -96,7 +96,7 @@ USER ${USER}
 # SET UP GIT
 RUN git config --global --add safe.directory $APP_ROOT
 
-ENTRYPOINT ["sudo", "/entrypoint.sh"]
+ENTRYPOINT ["sudo", "-E", "/entrypoint.sh"]
 
 # CMD will be replaced during build with the base image's CMD
 CMD __BASE_CMD__
