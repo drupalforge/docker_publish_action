@@ -74,7 +74,6 @@ RUN mkdir -p /var/log/supervisor
 
 # Copy and set up entrypoint script
 COPY --from=docker_publish_action entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
 ARG APP_ROOT=/var/www/html
 ARG APACHE_RUN_USER=www
