@@ -26,6 +26,14 @@ chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP "$APP_ROOT/.devpanel/milvus"
 ln -sf "$APP_ROOT/.devpanel/milvus/volumes/milvus" /var/lib/milvus
 ln -sf "$APP_ROOT/.devpanel/milvus/volumes/etcd" /etcd
 
+# Restore Milvus volumes from archive if present
+if [ -f "$APP_ROOT/.devpanel/dumps/milvus.tgz" ]; then
+  echo 'Restoring Milvus volumes from archive...'
+  rm -rf "$APP_ROOT/.devpanel/milvus/volumes/*"
+  tar xzf "$APP_ROOT/.devpanel/dumps/milvus.tgz" -C "$APP_ROOT/.devpanel/milvus/volumes"
+  rm -f "$APP_ROOT/.devpanel/dumps/milvus.tgz"
+fi
+
 # Set Apache command from arguments (either from CMD or docker run override)
 if [ $# -gt 0 ]; then
   export APACHE_COMMAND="$*"
