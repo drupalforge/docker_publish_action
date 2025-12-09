@@ -18,13 +18,10 @@ for host in etcd minio milvus attu; do
   fi
 done
 
-# Ensure Milvus, Minio, and Etcd volume directories exist and create symlinks
+# Ensure Milvus, Minio, and Etcd volume directories exist
 mkdir -p "$APP_ROOT/.devpanel/milvus/volumes/milvus" \
          "$APP_ROOT/.devpanel/milvus/volumes/minio" \
          "$APP_ROOT/.devpanel/milvus/volumes/etcd"
-chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP "$APP_ROOT/.devpanel/milvus"
-ln -sf "$APP_ROOT/.devpanel/milvus/volumes/milvus" /var/lib/milvus
-ln -sf "$APP_ROOT/.devpanel/milvus/volumes/etcd" /etcd
 
 # Restore Milvus volumes from archive if present
 if [ -f "$APP_ROOT/.devpanel/dumps/milvus.tgz" ]; then
@@ -33,6 +30,9 @@ if [ -f "$APP_ROOT/.devpanel/dumps/milvus.tgz" ]; then
   tar xzf "$APP_ROOT/.devpanel/dumps/milvus.tgz" -C "$APP_ROOT/.devpanel/milvus/volumes"
   rm -f "$APP_ROOT/.devpanel/dumps/milvus.tgz"
 fi
+
+# Set ownership of Milvus volume directories
+chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP "$APP_ROOT/.devpanel/milvus"
 
 # Set Apache command from arguments (either from CMD or docker run override)
 if [ $# -gt 0 ]; then
