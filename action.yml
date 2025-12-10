@@ -112,10 +112,6 @@ runs:
           docker_publish_action=./docker_publish_action
         file: ./docker_publish_action/Dockerfile
         platforms: ${{ inputs.build_platform || 'linux/amd64' }}
-        build-args: |
-          APP_ROOT=/var/www/html
-          APACHE_RUN_USER=www
-          APACHE_RUN_GROUP=www
         push: false
         load: true
         cache-from: type=registry,ref=${{ env.IMAGE_REPO }}:buildcache-${{ github.ref_name }}
@@ -124,26 +120,30 @@ runs:
     - name: Run init.sh in container with MySQL
       id: post_build_init
       run: |
-        # Generate .env from env.template, replacing placeholders with dynamic values
-        sed -e "s|__OPENAI_KEY__|${{ inputs.openai_key }}|g" \
-          -e "s|__DP_AI_VIRTUAL_KEY__|${{ inputs.dp_ai_virtual_key || '' }}|g" \
-          -e "s|__DP_APP_ID__|${{ inputs.image_repo || github.repository }}|g" \
-          docker_publish_action/.env.template > docker_publish_action/.env
-
         WEBSERVER=$(docker run -dq \
           --network ${NETWORK:-bridge} \
           --add-host=milvus:127.0.0.1 \
           --add-host=etcd:127.0.0.1 \
           --add-host=minio:127.0.0.1 \
           --add-host=attu:127.0.0.1 \
-          --env-file docker_publish_action/.env \
           ${{ steps.build_image.outputs.imageid }})
         echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
         docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/custom_package_installer.sh'
         echo "WAIT FOR SERVICES TO BE HEALTHY"
         docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/wait-for-services.sh'
         echo "INSTALL DRUPAL"
-        docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/init.sh'
+        docker exec \
+          -e DB_ROOT_PASSWORD=root \
+          -e DB_PASSWORD=password \
+          -e DB_USER=user \
+          -e DB_NAME=drupaldb \
+          -e DB_HOST=mysql \
+          -e DB_PORT=3306 \
+          -e DB_DRIVER=mysql \
+          -e OPENAI_KEY=${{ inputs.openai_key }} \
+          -e DP_AI_VIRTUAL_KEY=${{ inputs.dp_ai_virtual_key || '' }} \
+          -e DP_APP_ID=${{ inputs.image_repo || github.repository }} \
+          $WEBSERVER sh -c '$APP_ROOT/.devpanel/init.sh'
       shell: bash
 
     - name: Hash current files
@@ -206,18 +206,6 @@ runs:
         echo "DUMPS DATABASE + STATIC FILE"
         docker exec $WEBSERVER bash -c '$APP_ROOT/.devpanel/create_quickstart.sh'
         docker exec $WEBSERVER bash -c 'rm $APP_ROOT/.devpanel/dumps/files.tgz'
-      shell: bash
-
-    - name: Cleanup sensitive environment variables
-      if: steps.compare_hash.outputs.skip != 'true'
-      run: |
-        docker exec $WEBSERVER bash -c '
-          if [ -f docker_publish_action/.env ]; then
-            grep -v "^#" docker_publish_action/.env | cut -d= -f1 | while IFS= read -r var; do
-              unset "$var"
-            done
-          fi
-        '
       shell: bash
 
     - name: Commit and push the container state to Docker Hub
