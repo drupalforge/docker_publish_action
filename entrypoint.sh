@@ -21,7 +21,8 @@ done
 # Ensure Milvus, Minio, and Etcd volume directories exist
 mkdir -p "$APP_ROOT/.devpanel/milvus/volumes/milvus" \
          "$APP_ROOT/.devpanel/milvus/volumes/minio" \
-         "$APP_ROOT/.devpanel/milvus/volumes/etcd"
+         "$APP_ROOT/.devpanel/milvus/volumes/etcd" \
+         /run/milvus
 
 # Restore Milvus volumes from archive if present
 if [ -f "$APP_ROOT/.devpanel/dumps/milvus.tgz" ]; then
@@ -32,7 +33,9 @@ if [ -f "$APP_ROOT/.devpanel/dumps/milvus.tgz" ]; then
 fi
 
 # Set ownership of Milvus volume directories
-chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP "$APP_ROOT/.devpanel/milvus"
+chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP "$APP_ROOT/.devpanel" \
+  /run/milvus
+chmod go-rwx "$APP_ROOT/.devpanel/milvus/volumes/etcd"
 
 # Set Apache command from arguments (either from CMD or docker run override)
 if [ $# -gt 0 ]; then
