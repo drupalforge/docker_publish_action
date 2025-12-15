@@ -79,6 +79,11 @@ RUN mkdir -p /var/log/supervisor
 # Copy and set up entrypoint script
 COPY --from=docker_publish_action entrypoint.sh /entrypoint.sh
 
+# Fix Apache mutex issue in Docker and fix apache-start.sh script
+RUN grep -q '^Mutex ' /templates/apache2.conf || echo 'Mutex file:/var/run/apache2' >> /templates/apache2.conf && \
+    grep -q '^ServerName ' /templates/apache2.conf || echo 'ServerName localhost' >> /templates/apache2.conf && \
+    sed -i 's|/bin/bash source ~/.bashrc|source ~/.bashrc|' /scripts/apache-start.sh
+
 ARG APP_ROOT=/var/www/html
 ARG APACHE_RUN_USER=www
 ARG APACHE_RUN_GROUP=www

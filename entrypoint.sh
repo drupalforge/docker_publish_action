@@ -22,6 +22,7 @@ done
 mkdir -p "$APP_ROOT/.devpanel/milvus/volumes/milvus" \
          "$APP_ROOT/.devpanel/milvus/volumes/minio" \
          "$APP_ROOT/.devpanel/milvus/volumes/etcd" \
+         "$WEB_ROOT" \
          /run/milvus
 
 # Restore Milvus volumes from archive if present
@@ -33,7 +34,9 @@ if [ -f "$APP_ROOT/.devpanel/dumps/milvus.tgz" ]; then
 fi
 
 # Set ownership of Milvus volume directories
-chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP "$APP_ROOT/.devpanel" \
+chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP \
+  "$APP_ROOT/.devpanel" \
+  "$WEB_ROOT" \
   /run/milvus
 chmod go-rwx "$APP_ROOT/.devpanel/milvus/volumes/etcd"
 
