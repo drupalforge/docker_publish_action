@@ -94,11 +94,12 @@ ARG WEB_ROOT=/var/www/html/web
 # Fix permissions for attu to write env-config.js and create symlinks for Milvus volumes
 RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /app/build && \
     ln -sf "$APP_ROOT/.devpanel/milvus/volumes/etcd" /etcd && \
-    ln -sf "$APP_ROOT/.devpanel/milvus/volumes/milvus" /var/lib/milvus
+    ln -sf "$APP_ROOT/.devpanel/milvus/volumes/milvus" /var/lib/milvus && \
+    rm -rf "$APP_ROOT"
 
 # Copy application code from default context
-COPY . $APP_ROOT/
-RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP $APP_ROOT
+COPY . "$APP_ROOT/"
+RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP "$APP_ROOT"
 
 USER ${USER}
 

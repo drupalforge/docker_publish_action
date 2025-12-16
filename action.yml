@@ -83,11 +83,6 @@ runs:
         echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
       shell: bash
 
-    - name: Generate .dockerignore in build context
-      run: |
-        sed "s|__APP_ROOT__|/var/www/html|g" docker_publish_action/.dockerignore.template > app/.dockerignore
-      shell: bash
-
     - name: Get CMD from base image and generate Dockerfile
       id: prepare_dockerfile
       run: |
