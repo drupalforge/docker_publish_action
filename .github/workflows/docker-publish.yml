@@ -47,12 +47,75 @@ jobs:
           echo "cached_hash=$(cat .files_hash.cache)" >> $GITHUB_OUTPUT
           cat .files_hash.cache
         shell: bash
+
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Create files to hash
+        env:
+          APP_ROOT: ${{ github.workspace }}
+        run: |
+          .devpanel/composer_setup.sh
+          composer -n update --no-install
+        shell: bash
+
+      - name: Hash current files
+        id: hash_files
+        env:
+          FILES_TO_HASH: ${{ inputs.files_to_hash || 'composer.lock' }}
+        run: |
+          echo "HASH FILES"
+          HASH=""
+          if [ -n $FILES_TO_HASH ]; then
+            EXISTING_FILES=""
+            # Use eval and set to handle quoted filenames with spaces
+            eval set -- $FILES_TO_HASH
+            for f; do
+              echo "Hashing $f to check for changes."
+              if [ -f "$f" ]; then
+                if [ -n $EXISTING_FILES ]; then
+                  f=$'\n'$f
+                fi
+                EXISTING_FILES=$EXISTING_FILES$f
+              fi
+            done
+            if [ -n $EXISTING_FILES ]; then
+              EXISTING_FILES=$(echo $EXISTING_FILES | sort)
+              for f in $EXISTING_FILES; do
+                FILE_HASH=$(sha256sum "$f" | awk '{print $1}')
+                if [ -z $HASH ]; then
+                  HASH=$FILE_HASH
+                else
+                  HASH=$(printf "%s%s" $HASH $FILE_HASH | sha256sum | awk '{print $1}')
+                fi
+              done
+            fi
+          fi
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Compare current and previous file hashes
+        if: github.event_name != 'push' && steps.hash_files.outputs.hash != ''
+        id: compare_hash
+        env:
+          CACHED_HASH: ${{ steps.read_cached_hash.outputs.cached_hash }}
+          HASH: ${{ steps.hash_files.outputs.hash }}
+        run: |
+          echo "CHECK FOR CHANGES"
+          if [ -n ${CACHED_HASH+x} ] && [ $CACHED_HASH == $HASH ]; then
+            echo "Hash unchanged, skipping rest of the action."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
     outputs:
       cached_hash: ${{ steps.read_cached_hash.outputs.cached_hash || null }}
       matched_key: ${{ steps.cache.outputs.cache-matched-key || null }}
+      hash: ${{ steps.hash_files.outputs.hash || null }}
+      skip: ${{ steps.compare_hash.outputs.skip || null }}
 
   build-and-push:
     needs: retrieve-files-hash
+    if: needs.retrieve-files-hash.outputs.skip != 'true'
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -74,16 +137,9 @@ jobs:
         arch:
           - linux/amd64
     steps:
-      - name: Check out action repository
-        uses: actions/checkout@v4
-        with:
-          repository: drupalforge/docker_publish_action
-          ref: dries_note_vienna_2025
-          path: docker_publish_action
-      
       - name: Publish image to Docker Hub
         id: publish
-        uses: ./docker_publish_action
+        uses: drupalforge/docker_publish_action@dries_note_vienna_2025
         env:
           NETWORK: ${{ job.services.mysql.network }}
         with:
@@ -97,7 +153,6 @@ jobs:
           build_platform: ${{ matrix.arch }}
 
       - name: Save image ID to file
-        if: steps.publish.outputs.skip != 'true'
         id: save_image_id
         run: |
           ARCH_SAFE="${{ matrix.arch }}"
@@ -106,19 +161,13 @@ jobs:
           echo '{ "${{ matrix.arch }}": "${{ steps.publish.outputs.image }}" }' > "${ARCH_SAFE}-image_id.json"
 
       - name: Upload artifact with image ID
-        if: steps.publish.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.save_image_id.outputs.arch_safe }}-image_id
           path: ${{ steps.save_image_id.outputs.arch_safe }}-image_id.json
 
-    outputs:
-      hash: ${{ steps.publish.outputs.hash }}
-      skip: ${{ steps.publish.outputs.skip }}
-
   create-manifest:
     needs: build-and-push
-    if: needs.build-and-push.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download image ID artifact
@@ -144,12 +193,8 @@ jobs:
     needs:
       - retrieve-files-hash
       - build-and-push
-    if: needs.build-and-push.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
       - name: Delete old cached hash
         if: needs.retrieve-files-hash.outputs.matched_key
         continue-on-error: true
@@ -162,7 +207,7 @@ jobs:
       - name: Save new hash to cache file
         id: save_hash_file
         run: |
-          echo "${{ needs.build-and-push.outputs.hash }}" > .files_hash.cache
+          echo "${{ needs.retrieve-files-hash.outputs.hash }}" > .files_hash.cache
         shell: bash
 
       - name: Save hash to cache
