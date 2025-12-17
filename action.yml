@@ -121,13 +121,6 @@ runs:
           --add-host=etcd:127.0.0.1 \
           --add-host=minio:127.0.0.1 \
           --add-host=attu:127.0.0.1 \
-          ${{ steps.build_image.outputs.imageid }})
-        echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
-        docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/custom_package_installer.sh'
-        echo "WAIT FOR SERVICES TO BE HEALTHY"
-        docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/wait-for-services.sh'
-        echo "INSTALL DRUPAL"
-        docker exec \
           -e DB_ROOT_PASSWORD=root \
           -e DB_PASSWORD=password \
           -e DB_USER=user \
@@ -135,9 +128,16 @@ runs:
           -e DB_HOST=mysql \
           -e DB_PORT=3306 \
           -e DB_DRIVER=mysql \
+          -e DP_APP_ID=${{ inputs.image_repo || github.repository }} \
+          ${{ steps.build_image.outputs.imageid }})
+        echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
+        docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/custom_package_installer.sh'
+        echo "WAIT FOR SERVICES TO BE HEALTHY"
+        docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/wait-for-services.sh'
+        echo "INSTALL DRUPAL"
+        docker exec \
           -e OPENAI_KEY=${{ inputs.openai_key }} \
           -e DP_AI_VIRTUAL_KEY=${{ inputs.dp_ai_virtual_key || '' }} \
-          -e DP_APP_ID=${{ inputs.image_repo || github.repository }} \
           $WEBSERVER sh -c '$APP_ROOT/.devpanel/init.sh'
       shell: bash
 
@@ -199,15 +199,7 @@ runs:
       if: steps.compare_hash.outputs.skip != 'true'
       run: |
         echo "DUMPS DATABASE + STATIC FILE"
-        docker exec \
-          -e DB_PASSWORD=password \
-          -e DB_USER=user \
-          -e DB_NAME=drupaldb \
-          -e DB_HOST=mysql \
-          -e DB_PORT=3306 \
-          -e DB_DRIVER=mysql \
-          -e DP_APP_ID=${{ inputs.image_repo || github.repository }} \
-          $WEBSERVER bash -c '$APP_ROOT/.devpanel/create_quickstart.sh'
+        docker exec $WEBSERVER bash -c '$APP_ROOT/.devpanel/create_quickstart.sh'
         docker exec $WEBSERVER bash -c 'rm $APP_ROOT/.devpanel/dumps/files.tgz'
       shell: bash
 
