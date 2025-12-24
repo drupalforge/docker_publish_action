@@ -71,18 +71,6 @@ runs:
         echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
       shell: bash
 
-    - name: Get CMD from base image and generate Dockerfile
-      id: prepare_dockerfile
-      run: |
-        BASE_IMAGE="devpanel/php:8.3-base-ai"
-        docker pull $BASE_IMAGE
-        # Get CMD as JSON array
-        CMD_JSON=$(docker inspect $BASE_IMAGE | jq -c '.[0].Config.Cmd')
-        echo "Base image CMD: $CMD_JSON"
-        # Generate Dockerfile from Dockerfile.template
-        sed "s|__BASE_CMD__|$CMD_JSON|" docker_publish_action/Dockerfile.template > docker_publish_action/Dockerfile
-      shell: bash
-
     - name: Build image (no push, load to local Docker)
       id: build_image
       uses: docker/build-push-action@v6

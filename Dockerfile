@@ -76,9 +76,6 @@ COPY --from=docker_publish_action supervisor/conf.d/* /etc/supervisor/conf.d/
 # Create supervisor log directory
 RUN mkdir -p /var/log/supervisor
 
-# Copy and set up entrypoint script
-COPY --from=docker_publish_action entrypoint.sh /entrypoint.sh
-
 # Fix Apache mutex issue in Docker and fix apache-start.sh script
 RUN grep -q '^Mutex ' /templates/apache2.conf || echo 'Mutex file:/var/run/apache2' >> /templates/apache2.conf && \
     grep -q '^ServerName ' /templates/apache2.conf || echo 'ServerName localhost' >> /templates/apache2.conf && \
@@ -112,8 +109,3 @@ ENV APACHE_RUN_GROUP=${APACHE_RUN_GROUP}
 ENV DP_HOSTNAME=${DP_HOSTNAME}
 ENV CODES_ENABLE=${CODES_ENABLE}
 ENV WEB_ROOT=${WEB_ROOT}
-
-ENTRYPOINT ["sudo", "-E", "/entrypoint.sh"]
-
-# CMD will be replaced during build with the base image's CMD
-CMD __BASE_CMD__
