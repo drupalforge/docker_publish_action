@@ -3,7 +3,7 @@ FROM quay.io/coreos/etcd:v3.5.5 AS etcd
 FROM milvusdb/milvus:v2.4.1 AS milvus
 FROM minio/minio:RELEASE.2023-03-20T20-16-18Z AS minio
 
-FROM devpanel/php:8.3-base-ai
+FROM devpanel/php:8.3-base
 
 USER root
 
@@ -35,10 +35,9 @@ RUN apt-get install -y -qq supervisor python3-pip curl && \
     pip3 install supervisord-dependent-startup --break-system-packages
 
 # Install Milvus dependencies
-RUN apt-get install -y -qq \
-    libaio1 \
-    libopenblas0 \
-    libgomp1
+RUN apt-get install -y -qq libaio1t64 libopenblas0 libgomp1 && \
+    LIBAIO_LIBDIR=$(dpkg-architecture -q DEB_HOST_MULTIARCH) && \
+    ln -s /usr/lib/$LIBAIO_LIBDIR/libaio.so.1t64 /usr/lib/$LIBAIO_LIBDIR/libaio.so.1
 
 # Install yarn for Attu
 RUN apt-get install -y -qq yarnpkg && \
@@ -89,7 +88,8 @@ ARG CODES_ENABLE=no
 ARG WEB_ROOT=/var/www/html/web
 
 # Fix permissions for attu to write env-config.js and create symlinks for Milvus volumes
-RUN chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP /app/build && \
+RUN cd /app && yarn install && \
+    chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP build && \
     ln -sf "$APP_ROOT/.devpanel/milvus/volumes/etcd" /etcd && \
     ln -sf "$APP_ROOT/.devpanel/milvus/volumes/milvus" /var/lib/milvus && \
     rm -rf "$APP_ROOT"
