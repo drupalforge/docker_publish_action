@@ -31,7 +31,7 @@ inputs:
     required: false
     default: 'devpanel/php:8.3-base-rc'
   dockerfile_path:
-    description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. Defaults to .devpanel/Dockerfile if it exists.'
+    description: 'Path to a Dockerfile fragment (relative to app root) whose instructions are appended to the base Dockerfile. This fragment must not contain its own FROM or # syntax= directives. Defaults to .devpanel/Dockerfile if it exists.'
     required: false
 runs:
   using: "composite"
@@ -90,11 +90,11 @@ runs:
           fi
           case "${CUSTOM_RESOLVED}/" in
             "${APP_ROOT}/"*)
-              if [ -r "$CUSTOM_RESOLVED" ]; then
+              if [ -f "$CUSTOM_RESOLVED" ] && [ -r "$CUSTOM_RESOLVED" ]; then
                 cat "$BASE_DOCKERFILE" "$CUSTOM_RESOLVED" > "$COMBINED"
                 echo "path=$COMBINED" >> $GITHUB_OUTPUT
               else
-                echo "::error::dockerfile_path '$CUSTOM_PATH' is not readable"
+                echo "::error::dockerfile_path '$CUSTOM_PATH' is not a readable file"
                 exit 1
               fi
               ;;

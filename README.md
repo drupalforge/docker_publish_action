@@ -43,6 +43,7 @@ If your repository is in the [Drupal Forge](https://github.com/drupalforge) orga
 Builds a platform Docker image, runs post-build initialization, and outputs the image digest and file hash. Automatically falls back to local builder if cloud builder is unavailable.
 
 **Inputs:**
+
 - `dockerhub_username` (required): Docker Hub username
 - `dockerhub_token` (required): Docker Hub token
 - `image_repo` (optional): Docker Hub image repository (defaults to GitHub repository)
@@ -50,9 +51,10 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `cached_hash` (optional): Previously cached files hash for comparison
 - `build_platform` (optional): Target platform (e.g., `linux/amd64`, `linux/arm64`)
 - `base_image` (optional): Base Docker image to build from (default: `devpanel/php:8.3-base-rc`)
-- `dockerfile_path` (optional): Path to a Dockerfile relative to the app root whose instructions are appended to the base Dockerfile. If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
+- `dockerfile_path` (optional): Path to a Dockerfile fragment relative to the app root whose instructions are appended to the base Dockerfile. This fragment must not contain its own `FROM` or `# syntax=` directives. If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
 
 **Outputs:**
+
 - `hash`: Files hash
 - `skip`: Skip manifest generation
 - `image`: Image digest for this platform
@@ -62,12 +64,14 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 Creates and pushes a Docker manifest to Docker Hub for a multi-arch image, using digests from platform builds.
 
 **Inputs:**
+
 - `dockerhub_username` (required): Docker Hub username
 - `dockerhub_token` (required): Docker Hub token
 - `image_repo` (optional): Docker Hub image repository (defaults to GitHub repository)
 - `manifest_images` (required): JSON map of platform labels to image digests
 
 **Outputs:**
+
 - None
 
 ## Configuration
@@ -78,7 +82,7 @@ Creates and pushes a Docker manifest to Docker Hub for a multi-arch image, using
 
 ## Lint Workflow
 
-The repository includes a lint workflow (`.github/workflows/lint.yml`) that runs automatically on every push and pull request to validate:
+The repository includes a lint workflow (`.github/workflows/lint.yml`) that runs automatically on pushes to the `main` and `develop` branches, and on all pull requests, to validate:
 
 - **Dockerfile** — checked with [Hadolint](https://github.com/hadolint/hadolint). Configuration is in `.hadolint.yaml`.
 - **YAML files** — checked with [yamllint](https://yamllint.readthedocs.io/).
