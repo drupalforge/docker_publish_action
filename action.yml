@@ -31,7 +31,7 @@ inputs:
     required: false
     default: 'devpanel/php:8.3-base-rc'
   dockerfile_path:
-    description: 'Path to a Dockerfile fragment (relative to app root) whose instructions are appended to the base Dockerfile. This fragment must not contain its own FROM or # syntax= directives. Defaults to .devpanel/Dockerfile if it exists.'
+    description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. Multi-stage builds with additional FROM stages are supported. The file must not include a "# syntax=" directive (which must appear on line 1 of a Dockerfile). Defaults to .devpanel/Dockerfile if it exists.'
     required: false
 runs:
   using: "composite"
@@ -91,8 +91,8 @@ runs:
           case "${CUSTOM_RESOLVED}/" in
             "${APP_ROOT}/"*)
               if [ -f "$CUSTOM_RESOLVED" ] && [ -r "$CUSTOM_RESOLVED" ]; then
-                if grep -qE '^(FROM |# syntax=)' "$CUSTOM_RESOLVED"; then
-                  echo "::error::dockerfile_path '$CUSTOM_PATH' must be a Dockerfile fragment (no FROM or # syntax= directives)"
+                if grep -qE '^# syntax=' "$CUSTOM_RESOLVED"; then
+                  echo "::error::dockerfile_path '$CUSTOM_PATH' must not contain a '# syntax=' directive (it must be on line 1 of a Dockerfile)"
                   exit 1
                 fi
                 cat "$BASE_DOCKERFILE" "$CUSTOM_RESOLVED" > "$COMBINED"
@@ -108,8 +108,8 @@ runs:
               ;;
           esac
         elif [ -r "app/.devpanel/Dockerfile" ]; then
-          if grep -qE '^(FROM |# syntax=)' "app/.devpanel/Dockerfile"; then
-            echo "::error::app/.devpanel/Dockerfile must be a Dockerfile fragment (no FROM or # syntax= directives)"
+          if grep -qE '^# syntax=' "app/.devpanel/Dockerfile"; then
+            echo "::error::app/.devpanel/Dockerfile must not contain a '# syntax=' directive (it must be on line 1 of a Dockerfile)"
             exit 1
           fi
           cat "$BASE_DOCKERFILE" "app/.devpanel/Dockerfile" > "$COMBINED"

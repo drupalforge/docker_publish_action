@@ -51,7 +51,7 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `cached_hash` (optional): Previously cached files hash for comparison
 - `build_platform` (optional): Target platform (e.g., `linux/amd64`, `linux/arm64`)
 - `base_image` (optional): Base Docker image to build from (default: `devpanel/php:8.3-base-rc`)
-- `dockerfile_path` (optional): Path to a Dockerfile fragment relative to the app root whose instructions are appended to the base Dockerfile. This fragment must not contain its own `FROM` or `# syntax=` directives. If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
+- `dockerfile_path` (optional): Path to a Dockerfile (relative to the app root) whose instructions are appended to the base Dockerfile. Multi-stage builds with additional `FROM` stages are supported. The file must not include a `# syntax=` directive (which must appear on line 1 of a Dockerfile). If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
 
 **Outputs:**
 
