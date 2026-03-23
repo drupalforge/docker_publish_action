@@ -1,4 +1,4 @@
-ARG BASE_IMAGE="devpanel/php:8.3-base-rc"
+ARG BASE_IMAGE=devpanel/php:8.3-base-rc
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 

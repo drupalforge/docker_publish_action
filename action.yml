@@ -91,6 +91,10 @@ runs:
           case "${CUSTOM_RESOLVED}/" in
             "${APP_ROOT}/"*)
               if [ -f "$CUSTOM_RESOLVED" ] && [ -r "$CUSTOM_RESOLVED" ]; then
+                if grep -qE '^(FROM |# syntax=)' "$CUSTOM_RESOLVED"; then
+                  echo "::error::dockerfile_path '$CUSTOM_PATH' must be a Dockerfile fragment (no FROM or # syntax= directives)"
+                  exit 1
+                fi
                 cat "$BASE_DOCKERFILE" "$CUSTOM_RESOLVED" > "$COMBINED"
                 echo "path=$COMBINED" >> $GITHUB_OUTPUT
               else
@@ -104,6 +108,10 @@ runs:
               ;;
           esac
         elif [ -r "app/.devpanel/Dockerfile" ]; then
+          if grep -qE '^(FROM |# syntax=)' "app/.devpanel/Dockerfile"; then
+            echo "::error::app/.devpanel/Dockerfile must be a Dockerfile fragment (no FROM or # syntax= directives)"
+            exit 1
+          fi
           cat "$BASE_DOCKERFILE" "app/.devpanel/Dockerfile" > "$COMBINED"
           echo "path=$COMBINED" >> $GITHUB_OUTPUT
         else
