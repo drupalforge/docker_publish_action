@@ -14,6 +14,14 @@ on:
         description: 'List of files to check for changes (space or newline separated). Relative paths are assumed to be in app root. Defaults to composer.lock if not provided.'
         required: false
         type: string
+      base_image:
+        description: 'Base Docker image to build from. Defaults to devpanel/php:8.3-base-rc.'
+        required: false
+        type: string
+      dockerfile_path:
+        description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. Defaults to .devpanel/Dockerfile if it exists.'
+        required: false
+        type: string
     secrets:
       dockerhub_token:
         description: 'Docker Hub token'
@@ -84,6 +92,8 @@ jobs:
           files_to_hash: ${{ inputs.files_to_hash || null }}
           cached_hash: ${{ needs.retrieve-files-hash.outputs.cached_hash || null }}
           build_platform: ${{ matrix.arch }}
+          base_image: ${{ inputs.base_image || null }}
+          dockerfile_path: ${{ inputs.dockerfile_path || null }}
 
       - name: Save image ID to file
         if: steps.publish.outputs.skip != 'true'

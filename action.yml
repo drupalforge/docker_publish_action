@@ -26,6 +26,13 @@ inputs:
   build_platform:
     description: 'Target platform for the build. Defaults to linux/amd64.'
     required: false
+  base_image:
+    description: 'Base Docker image to build from. Defaults to devpanel/php:8.3-base-rc.'
+    required: false
+    default: 'devpanel/php:8.3-base-rc'
+  dockerfile_path:
+    description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. Multi-stage builds with additional FROM stages are supported. The file must not include a "# syntax=" directive (which must appear on line 1 of a Dockerfile). Defaults to .devpanel/Dockerfile if it exists.'
+    required: false
 runs:
   using: "composite"
   steps:
@@ -33,12 +40,6 @@ runs:
       uses: actions/checkout@v4
       with:
         path: app
-
-    - name: Check out Dockerfile
-      uses: actions/checkout@v4
-      with:
-        repository: drupalforge/docker_publish_action
-        path: docker_publish_action
 
     - name: Log in to Docker Hub
       uses: docker/login-action@v3
@@ -67,17 +68,63 @@ runs:
         echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
       shell: bash
 
+    - name: Determine Dockerfile to use
+      id: dockerfile
+      run: |
+        set -e
+        BASE_DOCKERFILE="${{ github.action_path }}/Dockerfile"
+        CUSTOM_PATH="${{ inputs.dockerfile_path }}"
+        COMBINED="/tmp/Dockerfile.combined"
+        APP_ROOT="$(realpath app)"
+        if [ -n "$CUSTOM_PATH" ]; then
+          CUSTOM_RESOLVED="$(realpath "app/$CUSTOM_PATH" 2>/dev/null || true)"
+          if [ -z "$CUSTOM_RESOLVED" ]; then
+            echo "::error::dockerfile_path '$CUSTOM_PATH' could not be resolved under app root"
+            exit 1
+          fi
+          case "${CUSTOM_RESOLVED}/" in
+            "${APP_ROOT}/"*)
+              if [ -f "$CUSTOM_RESOLVED" ] && [ -r "$CUSTOM_RESOLVED" ]; then
+                if grep -qE '^# syntax=' "$CUSTOM_RESOLVED"; then
+                  echo "::error::dockerfile_path '$CUSTOM_PATH' must not contain a '# syntax=' directive (it must be on line 1 of a Dockerfile)"
+                  exit 1
+                fi
+                cat "$BASE_DOCKERFILE" "$CUSTOM_RESOLVED" > "$COMBINED"
+                echo "path=$COMBINED" >> $GITHUB_OUTPUT
+              else
+                echo "::error::dockerfile_path '$CUSTOM_PATH' is not a readable file"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::dockerfile_path '$CUSTOM_PATH' resolves outside the app root"
+              exit 1
+              ;;
+          esac
+        elif [ -r "app/.devpanel/Dockerfile" ]; then
+          if grep -qE '^# syntax=' "app/.devpanel/Dockerfile"; then
+            echo "::error::app/.devpanel/Dockerfile must not contain a '# syntax=' directive (it must be on line 1 of a Dockerfile)"
+            exit 1
+          fi
+          cat "$BASE_DOCKERFILE" "app/.devpanel/Dockerfile" > "$COMBINED"
+          echo "path=$COMBINED" >> $GITHUB_OUTPUT
+        else
+          echo "path=$BASE_DOCKERFILE" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
+
     - name: Build image (no push, load to local Docker)
       id: build_image
       uses: docker/build-push-action@v6
       with:
         context: ./app
-        file: ./docker_publish_action/Dockerfile
+        file: ${{ steps.dockerfile.outputs.path }}
         platforms: ${{ inputs.build_platform || 'linux/amd64' }}
         build-args: |
           APP_ROOT=/var/www/html
           APACHE_RUN_USER=www
           APACHE_RUN_GROUP=www
+          BASE_IMAGE=${{ inputs.base_image || 'devpanel/php:8.3-base-rc' }}
         push: false
         load: true
 
