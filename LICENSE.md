@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD041 -->
 MIT License
 
 Copyright (c) 2025 Drupal Forge
