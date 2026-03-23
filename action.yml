@@ -81,10 +81,29 @@ runs:
         BASE_DOCKERFILE="./docker_publish_action/Dockerfile"
         CUSTOM_PATH="${{ inputs.dockerfile_path }}"
         COMBINED="/tmp/Dockerfile.combined"
-        if [ -n "$CUSTOM_PATH" ] && [ -r "app/$CUSTOM_PATH" ]; then
-          cat "$BASE_DOCKERFILE" "app/$CUSTOM_PATH" > "$COMBINED"
-          echo "path=$COMBINED" >> $GITHUB_OUTPUT
-        elif [ -z "$CUSTOM_PATH" ] && [ -r "app/.devpanel/Dockerfile" ]; then
+        APP_ROOT="$(realpath app)"
+        if [ -n "$CUSTOM_PATH" ]; then
+          CUSTOM_RESOLVED="$(realpath "app/$CUSTOM_PATH" 2>/dev/null || true)"
+          if [ -z "$CUSTOM_RESOLVED" ]; then
+            echo "::error::dockerfile_path '$CUSTOM_PATH' could not be resolved under app root"
+            exit 1
+          fi
+          case "${CUSTOM_RESOLVED}/" in
+            "${APP_ROOT}/"*)
+              if [ -r "$CUSTOM_RESOLVED" ]; then
+                cat "$BASE_DOCKERFILE" "$CUSTOM_RESOLVED" > "$COMBINED"
+                echo "path=$COMBINED" >> $GITHUB_OUTPUT
+              else
+                echo "::error::dockerfile_path '$CUSTOM_PATH' is not readable"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::dockerfile_path '$CUSTOM_PATH' resolves outside the app root"
+              exit 1
+              ;;
+          esac
+        elif [ -r "app/.devpanel/Dockerfile" ]; then
           cat "$BASE_DOCKERFILE" "app/.devpanel/Dockerfile" > "$COMBINED"
           echo "path=$COMBINED" >> $GITHUB_OUTPUT
         else

@@ -11,13 +11,13 @@ COPY . /app/
 
 USER root
 # PREPARE DIR FOR INSTALL
-RUN rm -rf $APP_ROOT && \
-    mkdir -p $APP_ROOT && \
-    cp -r /app/. $APP_ROOT/. && \
-    rm -rf /app && \
-    chown -R $APACHE_RUN_USER:$APACHE_RUN_GROUP $APP_ROOT
+RUN rm -rf -- "$APP_ROOT" && \
+    mkdir -p "$APP_ROOT" && \
+    cp -r /app/. "$APP_ROOT"/. && \
+    rm -rf -- /app && \
+    chown -R "$APACHE_RUN_USER":"$APACHE_RUN_GROUP" "$APP_ROOT"
 # SET UP GIT
-USER $APACHE_RUN_USER
-RUN git config --global --add safe.directory $APP_ROOT
+USER $USER
+RUN git config --global --add safe.directory "$APP_ROOT"
 # INSTALL CUSTOM PACKAGE
-RUN $APP_ROOT/.devpanel/custom_package_installer.sh
+RUN "$APP_ROOT"/.devpanel/custom_package_installer.sh
