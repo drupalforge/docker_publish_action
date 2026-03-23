@@ -19,5 +19,3 @@ RUN rm -rf -- "$APP_ROOT" && \
 # SET UP GIT
 USER $USER
 RUN git config --global --add safe.directory "$APP_ROOT"
-# INSTALL CUSTOM PACKAGE
-RUN "$APP_ROOT"/.devpanel/custom_package_installer.sh
