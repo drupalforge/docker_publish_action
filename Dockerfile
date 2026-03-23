@@ -1,4 +1,6 @@
-FROM devpanel/php:8.3-base-ai
+ARG BASE_IMAGE="devpanel/php:8.3-base-rc"
+# hadolint ignore=DL3006
+FROM ${BASE_IMAGE}
 
 ARG APP_ROOT="/var/www/html"
 ARG APACHE_RUN_USER="www"

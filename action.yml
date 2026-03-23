@@ -26,6 +26,13 @@ inputs:
   build_platform:
     description: 'Target platform for the build. Defaults to linux/amd64.'
     required: false
+  base_image:
+    description: 'Base Docker image to build from. Defaults to devpanel/php:8.3-base-rc.'
+    required: false
+    default: 'devpanel/php:8.3-base-rc'
+  dockerfile_path:
+    description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. Defaults to .devpanel/Dockerfile if it exists.'
+    required: false
 runs:
   using: "composite"
   steps:
@@ -67,17 +74,36 @@ runs:
         echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
       shell: bash
 
+    - name: Determine Dockerfile to use
+      id: dockerfile
+      run: |
+        set -e
+        BASE_DOCKERFILE="./docker_publish_action/Dockerfile"
+        CUSTOM_PATH="${{ inputs.dockerfile_path }}"
+        COMBINED="/tmp/Dockerfile.combined"
+        if [ -n "$CUSTOM_PATH" ] && [ -r "app/$CUSTOM_PATH" ]; then
+          cat "$BASE_DOCKERFILE" "app/$CUSTOM_PATH" > "$COMBINED"
+          echo "path=$COMBINED" >> $GITHUB_OUTPUT
+        elif [ -z "$CUSTOM_PATH" ] && [ -r "app/.devpanel/Dockerfile" ]; then
+          cat "$BASE_DOCKERFILE" "app/.devpanel/Dockerfile" > "$COMBINED"
+          echo "path=$COMBINED" >> $GITHUB_OUTPUT
+        else
+          echo "path=$BASE_DOCKERFILE" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
+
     - name: Build image (no push, load to local Docker)
       id: build_image
       uses: docker/build-push-action@v6
       with:
         context: ./app
-        file: ./docker_publish_action/Dockerfile
+        file: ${{ steps.dockerfile.outputs.path }}
         platforms: ${{ inputs.build_platform || 'linux/amd64' }}
         build-args: |
           APP_ROOT=/var/www/html
           APACHE_RUN_USER=www
           APACHE_RUN_GROUP=www
+          BASE_IMAGE=${{ inputs.base_image || 'devpanel/php:8.3-base-rc' }}
         push: false
         load: true
 

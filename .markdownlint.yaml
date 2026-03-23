@@ -1,0 +1,4 @@
+# markdownlint configuration
+default: true
+MD013: false  # line-length: handled by editors
+MD033: false  # allow inline HTML

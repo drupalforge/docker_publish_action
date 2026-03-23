@@ -12,6 +12,9 @@ This project provides GitHub Actions and workflows for building, publishing, and
 - MySQL service integration for post-build initialization
 - File hash-based change detection to skip unnecessary builds
 - Modular composite actions for platform builds and manifest publishing
+- Configurable base image
+- Extendable Dockerfile via `.devpanel/Dockerfile` or a custom path
+- Automated linting for Dockerfiles, YAML, and Markdown
 
 ## Usage
 
@@ -25,6 +28,7 @@ jobs:
       dockerhub_username: ${{ vars.DOCKERHUB_USERNAME }}
       image_repo: myorg/myimage
       files_to_hash: composer.lock package.json
+      base_image: devpanel/php:8.3-base-rc
     secrets:
       dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
       dp_ai_virtual_key: ${{ secrets.DP_AI_VIRTUAL_KEY }}
@@ -45,6 +49,8 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `files_to_hash` (optional): List of files to check for changes (default: `composer.lock`)
 - `cached_hash` (optional): Previously cached files hash for comparison
 - `build_platform` (optional): Target platform (e.g., `linux/amd64`, `linux/arm64`)
+- `base_image` (optional): Base Docker image to build from (default: `devpanel/php:8.3-base-rc`)
+- `dockerfile_path` (optional): Path to a Dockerfile relative to the app root whose instructions are appended to the base Dockerfile. If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
 
 **Outputs:**
 - `hash`: Files hash
@@ -69,3 +75,11 @@ Creates and pushes a Docker manifest to Docker Hub for a multi-arch image, using
 - The platform action expects a MySQL service to be available in your workflow.
 - All environment variables and build arguments are set in the Dockerfile and actions.
 - Input and secret names must match between your workflow and the action.
+
+## Lint Workflow
+
+The repository includes a lint workflow (`.github/workflows/lint.yml`) that runs automatically on every push and pull request to validate:
+
+- **Dockerfile** — checked with [Hadolint](https://github.com/hadolint/hadolint). Configuration is in `.hadolint.yaml`.
+- **YAML files** — checked with [yamllint](https://yamllint.readthedocs.io/).
+- **Markdown files** — checked with [markdownlint](https://github.com/DavidAnson/markdownlint). Configuration is in `.markdownlint.yaml`.
