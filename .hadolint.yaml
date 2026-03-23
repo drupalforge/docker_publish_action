@@ -1,6 +1,1 @@
 failure-threshold: error
-ignore:
-  # sudo is required to operate as the correct user inside the base image
-  - DL3004
-  # Dynamic base image via ARG BASE_IMAGE is intentional
-  - DL3006
