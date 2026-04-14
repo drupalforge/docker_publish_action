@@ -106,7 +106,6 @@ runs:
           -e DP_APP_ID=${{ inputs.image_repo || github.repository }} \
           ${{ steps.build_image.outputs.imageid }})
         echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
-        docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/custom_package_installer.sh'
         echo "WAIT FOR SERVICES TO BE HEALTHY"
         docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/wait-for-services.sh'
         echo "INSTALL DRUPAL"
