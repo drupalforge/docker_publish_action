@@ -16,14 +16,7 @@ RUN echo 'Dpkg::Use-Pty "0";' > /etc/apt/apt.conf.d/00usepty
 RUN apt-get update -qq
 
 # INSTALL CUSTOM PACKAGES (PHP extensions, project-specific tasks, etc.)
-RUN apt-get install -y -qq jq libavif-dev nano npm && \
-    docker-php-ext-configure gd --with-avif --with-freetype --with-jpeg --with-webp && \
-    docker-php-ext-install gd && \
-    for pkg in $(apt-cache depends libavif-dev | grep '^\s*Depends:' | grep -o 'libavif[^, ]*'); do \
-        apt-mark manual "$pkg"; \
-    done && \
-    apt-get purge -y -qq libavif-dev && \
-    apt-get autoremove -y -qq && \
+RUN apt-get install -y -qq jq nano npm ripgrep && \
     pecl update-channels && \
     printf '' | pecl install apcu && \
     echo 'extension=apcu.so' > /usr/local/etc/php/conf.d/apcu.ini && \
