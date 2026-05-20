@@ -40,7 +40,7 @@ If your repository is in the [Drupal Forge](https://github.com/drupalforge) orga
 
 ### Platform Build Action (`action.yml`)
 
-Builds a platform Docker image, runs post-build initialization, and outputs the image digest and file hash. Automatically falls back to local builder if cloud builder is unavailable.
+Builds a platform Docker image, runs post-build initialization, and outputs the image digest and file hash. Automatically falls back to local builder if cloud builder setup or cloud build execution fails.
 
 **Inputs:**
 
