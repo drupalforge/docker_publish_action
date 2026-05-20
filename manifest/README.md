@@ -12,7 +12,7 @@ This action creates and pushes a Docker manifest to Docker Hub for a multi-arch 
 ## Example Usage
 
 ```yaml
-- uses: drupalforge/docker_publish_action/manifest@main
+- uses: drupalforge/docker_publish_action/manifest@v1.1.2
   with:
     dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
     dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}

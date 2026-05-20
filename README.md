@@ -23,7 +23,7 @@ To use the reusable workflow, call it from your repository:
 ```yaml
 jobs:
   build-and-push:
-    uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
+    uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@v1.1.2
     with:
       dockerhub_username: ${{ vars.DOCKERHUB_USERNAME }}
       image_repo: myorg/myimage
