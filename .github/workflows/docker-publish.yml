@@ -54,6 +54,9 @@ jobs:
       - name: Create files to hash
         env:
           APP_ROOT: ${{ github.workspace }}
+          COMPOSER_NO_AUDIT: 1
+          COMPOSER_NO_BLOCKING: 1
+          COMPOSER_NO_SECURITY_BLOCKING: 1
         run: |
           .devpanel/composer_setup.sh
           composer -n update --no-install
