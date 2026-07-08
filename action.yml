@@ -177,6 +177,14 @@ runs:
           -e DB_DRIVER="mysql" \
           ${{ steps.built_image.outputs.imageid }})
         echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
+        docker exec $WEBSERVER bash -lc '
+          echo "=== PHP INI ==="
+          php --ini
+          echo "=== PHP ERROR SETTINGS ==="
+          php -i | grep -E "^(display_errors|display_startup_errors|error_reporting|log_errors|html_errors|xdebug\\.mode) =>"
+          echo "=== ENV ==="
+          env | grep -E "^(PHP_|XDEBUG_|SYMFONY_|DRUPAL_)"
+        '
         echo "INSTALL DRUPAL"
         docker exec $WEBSERVER sh -c '$APP_ROOT/.devpanel/init.sh'
       shell: bash
