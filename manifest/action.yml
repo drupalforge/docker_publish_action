@@ -7,10 +7,10 @@ branding:
 inputs:
   dockerhub_username:
     description: 'Docker Hub username'
-    required: true
+    required: false
   dockerhub_token:
     description: 'Docker Hub token'
-    required: true
+    required: false
   image_repo:
     description: 'Docker Hub image repository'
     required: false
@@ -34,10 +34,25 @@ runs:
         done
       shell: bash
 
+    - name: Resolve registry
+      id: registry
+      run: |
+        if [ -n "${{ inputs.dockerhub_username }}" ] && [ -n "${{ inputs.dockerhub_token }}" ]; then
+          echo "use_dockerhub=true" >> $GITHUB_OUTPUT
+        else
+          echo "use_dockerhub=false" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
+
     - name: Set IMAGE_REPO variable
       if: steps.check_images.outputs.skip != 'true'
       run: |
-        echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
+        if [ "${{ steps.registry.outputs.use_dockerhub }}" = "true" ]; then
+          echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
+        else
+          RAW="${{ inputs.image_repo || github.repository }}"
+          echo "IMAGE_REPO=ghcr.io/$(echo "$RAW" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+        fi
       shell: bash
 
     - name: Set tag to be pushed to Docker Hub
@@ -53,11 +68,19 @@ runs:
       shell: bash
 
     - name: Log in to Docker Hub
-      if: steps.check_images.outputs.skip != 'true'
+      if: steps.check_images.outputs.skip != 'true' && steps.registry.outputs.use_dockerhub == 'true'
       uses: docker/login-action@v4.1.0
       with:
         username: ${{ inputs.dockerhub_username }}
         password: ${{ inputs.dockerhub_token }}
+
+    - name: Log in to GitHub Container Registry
+      if: steps.check_images.outputs.skip != 'true' && steps.registry.outputs.use_dockerhub != 'true'
+      uses: docker/login-action@v4.1.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
 
     - name: Create and push manifest to Docker Hub
       if: steps.check_images.outputs.skip != 'true'
@@ -74,4 +97,19 @@ runs:
           eval $CREATE_CMD
           docker manifest push $IMAGE_REPO:$TAG
         done
+      shell: bash
+
+    - name: Set GHCR package visibility
+      if: steps.check_images.outputs.skip != 'true' && steps.registry.outputs.use_dockerhub != 'true' && github.event.repository.private == false
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        PACKAGE_NAME=$(echo "$IMAGE_REPO" | sed 's|ghcr.io/[^/]*/||')
+        OWNER="${{ github.repository_owner }}"
+        OWNER_TYPE=$(gh api "/users/$OWNER" --jq '.type')
+        if [ "$OWNER_TYPE" = "Organization" ]; then
+          gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE_NAME" -f visibility=public || true
+        else
+          gh api -X PATCH "/user/packages/container/$PACKAGE_NAME" -f visibility=public || true
+        fi
       shell: bash

@@ -1,13 +1,21 @@
 # Drupal Forge Manifest Action
 
-This action creates and pushes a Docker manifest to Docker Hub for a multi-arch image, using digests from the platform builds.
+This action creates and pushes a Docker manifest for a multi-arch image, using digests from the platform builds.
 
 ## Inputs
 
-- `dockerhub_username` (required): Docker Hub username
-- `dockerhub_token` (required): Docker Hub token
+- `dockerhub_username` (optional): Docker Hub username. If omitted (or if `dockerhub_token` is omitted), the action uses GHCR.
+- `dockerhub_token` (optional): Docker Hub token. If omitted (or if `dockerhub_username` is omitted), the action uses GHCR.
 - `image_repo` (optional): Docker Hub image repository (defaults to GitHub repository)
 - `manifest_images` (required): JSON map of platform labels to image digests
+
+When using GHCR, ensure the calling workflow grants:
+
+```yaml
+permissions:
+  contents: read
+  packages: write
+```
 
 ## Example Usage
 

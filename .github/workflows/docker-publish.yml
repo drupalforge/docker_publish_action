@@ -4,7 +4,7 @@ on:
     inputs:
       dockerhub_username:
         description: 'Docker Hub username'
-        required: true
+        required: false
         type: string
       image_repo:
         description: 'Docker Hub image repository. Defaults to the repository name if not provided.'
@@ -25,7 +25,7 @@ on:
     secrets:
       dockerhub_token:
         description: 'Docker Hub token'
-        required: true
+        required: false
       dp_ai_virtual_key:
         description: 'DevPanel AI Virtual Key'
         required: false
@@ -59,8 +59,66 @@ jobs:
       cached_hash: ${{ steps.read_cached_hash.outputs.cached_hash || null }}
       matched_key: ${{ steps.cache.outputs.cache-matched-key || null }}
 
+  determine-registry:
+    runs-on: ubuntu-latest
+    outputs:
+      use_dockerhub: ${{ steps.precheck.outputs.use_dockerhub || steps.check_repo.outputs.use_dockerhub || 'false' }}
+    steps:
+      - name: Precheck registry decision
+        id: precheck
+        env:
+          DOCKERHUB_USERNAME: ${{ inputs.dockerhub_username }}
+          DOCKERHUB_TOKEN: ${{ secrets.dockerhub_token }}
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -e
+          # No credentials → GHCR
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            exit 0
+          fi
+          # Public repo → Docker Hub
+          if [ "$REPO_PRIVATE" = "false" ]; then
+            echo "use_dockerhub=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # Private repo: only use Docker Hub when the repository already exists.
+          echo "check_private_repo=true" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Log in to Docker Hub
+        id: dockerhub_login
+        if: steps.precheck.outputs.check_private_repo == 'true'
+        continue-on-error: true
+        uses: docker/login-action@v3
+        with:
+          username: ${{ inputs.dockerhub_username }}
+          password: ${{ secrets.dockerhub_token }}
+
+      - name: Check Docker Hub repository existence
+        id: check_repo
+        if: steps.precheck.outputs.check_private_repo == 'true' && steps.dockerhub_login.outcome == 'success'
+        env:
+          PROBE_REF: docker.io/${{ inputs.image_repo || github.repository }}:latest
+        run: |
+          set -e
+          # Use the authenticated docker session from docker/login-action.
+          set +e
+          INSPECT_OUTPUT=$(docker buildx imagetools inspect "$PROBE_REF" 2>&1)
+          INSPECT_EXIT=$?
+          set -e
+
+          if [ "$INSPECT_EXIT" -eq 0 ]; then
+            echo "use_dockerhub=true" >> $GITHUB_OUTPUT
+          else
+            if echo "$INSPECT_OUTPUT" | grep -qi "manifest unknown"; then
+              # Repo exists but latest tag does not.
+              echo "use_dockerhub=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+        shell: bash
+
   build-and-push:
-    needs: retrieve-files-hash
+    needs: [retrieve-files-hash, determine-registry]
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -83,14 +141,14 @@ jobs:
           - linux/amd64
           - linux/arm64
     steps:
-      - name: Publish image to Docker Hub
+      - name: Publish image
         id: publish
         uses: drupalforge/docker_publish_action@main
         env:
           NETWORK: ${{ job.services.mysql.network }}
         with:
-          dockerhub_username: ${{ inputs.dockerhub_username }}
-          dockerhub_token: ${{ secrets.dockerhub_token }}
+          dockerhub_username: ${{ needs.determine-registry.outputs.use_dockerhub == 'true' && inputs.dockerhub_username || null }}
+          dockerhub_token: ${{ needs.determine-registry.outputs.use_dockerhub == 'true' && secrets.dockerhub_token || null }}
           dp_ai_virtual_key: ${{ secrets.dp_ai_virtual_key || null }}
           composer_auth: ${{ secrets.composer_auth || null }}
           image_repo: ${{ inputs.image_repo || github.repository }}
@@ -120,7 +178,7 @@ jobs:
       skip: ${{ steps.publish.outputs.skip }}
 
   create-manifest:
-    needs: build-and-push
+    needs: [build-and-push, determine-registry]
     if: needs.build-and-push.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
@@ -138,8 +196,8 @@ jobs:
 
       - uses: drupalforge/docker_publish_action/manifest@main
         with:
-          dockerhub_username: ${{ inputs.dockerhub_username }}
-          dockerhub_token: ${{ secrets.dockerhub_token }}
+          dockerhub_username: ${{ needs.determine-registry.outputs.use_dockerhub == 'true' && inputs.dockerhub_username || null }}
+          dockerhub_token: ${{ needs.determine-registry.outputs.use_dockerhub == 'true' && secrets.dockerhub_token || null }}
           image_repo: ${{ inputs.image_repo || github.repository }}
           manifest_images: ${{ steps.images.outputs.images }}
 
@@ -147,7 +205,7 @@ jobs:
     needs:
       - retrieve-files-hash
       - build-and-push
-    if: needs.build-and-push.outputs.skip != 'true'
+    if: needs.build-and-push.result == 'success' && needs.build-and-push.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out code

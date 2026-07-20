@@ -1,5 +1,5 @@
 name: 'Drupal Forge build platform image'
-description: 'Builds and pushes a platform image tagged by branch name to Docker Hub for a Drupal Forge template.'
+description: 'Builds and pushes a platform image tagged by branch name to a container registry for a Drupal Forge template.'
 author: 'Drupal Forge'
 branding:
   icon: 'package'
@@ -7,10 +7,10 @@ branding:
 inputs:
   dockerhub_username:
     description: 'Docker Hub username'
-    required: true
+    required: false
   dockerhub_token:
     description: 'Docker Hub token'
-    required: true
+    required: false
   dp_ai_virtual_key:
     description: 'DevPanel AI Virtual Key'
     required: false
@@ -44,17 +44,36 @@ runs:
       with:
         path: app
 
+    - name: Resolve registry
+      id: registry
+      run: |
+        if [ -n "${{ inputs.dockerhub_username }}" ] && [ -n "${{ inputs.dockerhub_token }}" ]; then
+          echo "use_dockerhub=true" >> $GITHUB_OUTPUT
+        else
+          echo "use_dockerhub=false" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
+
     - name: Log in to Docker Hub
+      if: steps.registry.outputs.use_dockerhub == 'true'
       uses: docker/login-action@v4.1.0
       with:
         username: ${{ inputs.dockerhub_username }}
         password: ${{ inputs.dockerhub_token }}
 
+    - name: Log in to GitHub Container Registry
+      if: steps.registry.outputs.use_dockerhub != 'true'
+      uses: docker/login-action@v4.1.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v4.0.0
 
     - name: Try Docker Buildx Cloud builder
-      if: inputs.build_platform && inputs.build_platform != 'linux/amd64'
+      if: inputs.build_platform && inputs.build_platform != 'linux/amd64' && steps.registry.outputs.use_dockerhub == 'true'
       id: buildx_cloud
       continue-on-error: true
       uses: docker/setup-buildx-action@v4.0.0
@@ -64,7 +83,12 @@ runs:
 
     - name: Set IMAGE_REPO variable
       run: |
-        echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
+        if [ "${{ steps.registry.outputs.use_dockerhub }}" = "true" ]; then
+          echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
+        else
+          RAW="${{ inputs.image_repo || github.repository }}"
+          echo "IMAGE_REPO=ghcr.io/$(echo "$RAW" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+        fi
       shell: bash
 
     - name: Determine Dockerfile to use
@@ -264,7 +288,7 @@ runs:
         docker exec "$WEBSERVER" bash -c 'rm $APP_ROOT/.devpanel/dumps/files.tgz'
       shell: bash
 
-    - name: Commit and push the container state to Docker Hub
+    - name: Commit and push the container state
       if: steps.compare_hash.outputs.skip != 'true'
       id: push_image
       run: |
@@ -272,6 +296,21 @@ runs:
         docker push $IMAGE_REPO:${{ github.ref_name }}
         IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_REPO:${{ github.ref_name }})
         echo "image=$IMAGE" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Set GHCR package visibility
+      if: steps.compare_hash.outputs.skip != 'true' && steps.registry.outputs.use_dockerhub != 'true' && github.event.repository.private == false
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        PACKAGE_NAME=$(echo "$IMAGE_REPO" | sed 's|ghcr.io/[^/]*/||')
+        OWNER="${{ github.repository_owner }}"
+        OWNER_TYPE=$(gh api "/users/$OWNER" --jq '.type')
+        if [ "$OWNER_TYPE" = "Organization" ]; then
+          gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE_NAME" -f visibility=public || true
+        else
+          gh api -X PATCH "/user/packages/container/$PACKAGE_NAME" -f visibility=public || true
+        fi
       shell: bash
 outputs:
   hash:
