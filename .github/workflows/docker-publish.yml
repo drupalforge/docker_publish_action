@@ -29,6 +29,9 @@ on:
       dp_ai_virtual_key:
         description: 'DevPanel AI Virtual Key'
         required: false
+      composer_auth:
+        description: 'Composer auth JSON for private package access during init steps'
+        required: false
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -89,6 +92,7 @@ jobs:
           dockerhub_username: ${{ inputs.dockerhub_username }}
           dockerhub_token: ${{ secrets.dockerhub_token }}
           dp_ai_virtual_key: ${{ secrets.dp_ai_virtual_key || null }}
+          composer_auth: ${{ secrets.composer_auth || null }}
           image_repo: ${{ inputs.image_repo || github.repository }}
           files_to_hash: ${{ inputs.files_to_hash || null }}
           cached_hash: ${{ needs.retrieve-files-hash.outputs.cached_hash || null }}

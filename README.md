@@ -32,6 +32,7 @@ jobs:
     secrets:
       dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
       dp_ai_virtual_key: ${{ secrets.DP_AI_VIRTUAL_KEY }}
+      composer_auth: ${{ secrets.COMPOSER_AUTH }}
 ```
 
 If your repository is in the [Drupal Forge](https://github.com/drupalforge) organization, there will be a _Docker build and push template_ on the Actions tab that sets this up for you.
@@ -52,6 +53,7 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `build_platform` (optional): Target platform (e.g., `linux/amd64`, `linux/arm64`)
 - `base_image` (optional): Base Docker image to build from (default: `devpanel/php:8.3-base-rc`)
 - `dockerfile_path` (optional): Path to a Dockerfile (relative to the app root) whose instructions are appended to the base Dockerfile. Multi-stage builds with additional `FROM` stages are supported. The file must not include a `# syntax=` directive (which must appear on line 1 of a Dockerfile). If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
+- `composer_auth` (optional): Composer auth JSON for repositories that need private package access during init steps. When using the reusable workflow, pass it as `composer_auth: ${{ secrets.COMPOSER_AUTH }}` in the `secrets:` block.
 
 **Outputs:**
 
