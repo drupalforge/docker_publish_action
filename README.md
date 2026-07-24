@@ -11,6 +11,7 @@ This project provides GitHub Actions and workflows for building, publishing, and
 - Automatic fallback from Docker Buildx cloud builder to local docker-container builder
 - MySQL service integration for post-build initialization
 - File hash-based change detection to skip unnecessary builds
+- Early workflow-run cancellation when hash is unchanged to stop parallel matrix jobs
 - Modular composite actions for platform builds and manifest publishing
 - Configurable base image
 - Extendable Dockerfile via `.devpanel/Dockerfile` or a custom path
@@ -42,6 +43,9 @@ Use this when you want to publish to Docker Hub:
 ```yaml
 jobs:
   build-and-push:
+    permissions:
+      actions: write  # Optional: only needed when cancel_run_on_skip is enabled (the default behavior)
+      contents: read
     uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
     with:
       dockerhub_username: ${{ vars.DOCKERHUB_USERNAME }}
@@ -62,6 +66,7 @@ Use this when you want to publish to GHCR. This path is selected when Docker Hub
 jobs:
   build-and-push:
     permissions:
+      actions: write  # Optional: only needed when cancel_run_on_skip is enabled (the default behavior)
       contents: read
       packages: write
     uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
@@ -74,7 +79,7 @@ jobs:
       composer_auth: ${{ secrets.COMPOSER_AUTH }}
 ```
 
-Keep this `permissions` block on the calling job whenever GHCR is a possible runtime outcome, including private repositories where Docker Hub credentials are present but the target Docker Hub repository does not already exist.
+Keep this `permissions` block on the calling job whenever GHCR is a possible runtime outcome, including private repositories where Docker Hub credentials are present but the target Docker Hub repository does not already exist. The `actions: write` permission is required only for the optional early-cancel behavior when a hash match is detected.
 
 If your repository is in the [Drupal Forge](https://github.com/drupalforge) organization, there will be a _Docker build and push template_ on the Actions tab that sets this up for you.
 
@@ -109,12 +114,15 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `base_image` (optional): Base Docker image to build from (default: `devpanel/php:8.3-base-rc`)
 - `dockerfile_path` (optional): Path to a Dockerfile (relative to the app root) whose instructions are appended to the base Dockerfile. Multi-stage builds with additional `FROM` stages are supported. The file must not include a `# syntax=` directive (which must appear on line 1 of a Dockerfile). If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
 - `composer_auth` (optional): Composer auth JSON for repositories that need private package access during init steps.
+- `cancel_run_on_skip` (optional): Cancel the workflow run when the hash is unchanged (`skip=true`). Enabled unless set to `false`. Requires `actions: write` on `GITHUB_TOKEN` when enabled.
 
 **Outputs:**
 
 - `hash`: Files hash
 - `skip`: Skip manifest generation
 - `image`: Image digest for this platform
+
+When `cached_hash` matches the computed `hash`, the action sets `skip=true`. Unless `cancel_run_on_skip` is set to `false`, the action also attempts to cancel the current workflow run to stop sibling jobs in a matrix. For cancellation to succeed, the caller must grant `actions: write` to `GITHUB_TOKEN`. If that permission is missing, or if the runner does not provide the `gh` CLI, the action logs a warning and continues without failing the workflow. Set `cancel_run_on_skip: false` to opt out of run-wide cancellation.
 
 ### Manifest Action (`manifest/action.yml`)
 
