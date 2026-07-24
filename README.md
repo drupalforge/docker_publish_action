@@ -11,6 +11,7 @@ This project provides GitHub Actions and workflows for building, publishing, and
 - Automatic fallback from Docker Buildx cloud builder to local docker-container builder
 - MySQL service integration for post-build initialization
 - File hash-based change detection to skip unnecessary builds
+- Early workflow-run cancellation when hash is unchanged to stop parallel matrix jobs
 - Modular composite actions for platform builds and manifest publishing
 - Configurable base image
 - Extendable Dockerfile via `.devpanel/Dockerfile` or a custom path
@@ -115,6 +116,8 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `hash`: Files hash
 - `skip`: Skip manifest generation
 - `image`: Image digest for this platform
+
+When `cached_hash` matches the computed `hash`, the action sets `skip=true` and cancels the current workflow run to stop sibling jobs in a matrix.
 
 ### Manifest Action (`manifest/action.yml`)
 

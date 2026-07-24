@@ -280,6 +280,15 @@ runs:
         fi
       shell: bash
 
+    - name: Cancel workflow run when hash is unchanged
+      if: steps.compare_hash.outputs.skip == 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        echo "Hash unchanged. Cancelling workflow run ${{ github.run_id }}."
+        gh api -X POST "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/cancel" || true
+      shell: bash
+
     - name: Save database and files dumps
       if: steps.compare_hash.outputs.skip != 'true'
       run: |
