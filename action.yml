@@ -277,7 +277,7 @@ runs:
         HASH: ${{ steps.hash_files.outputs.hash }}
       run: |
         echo "CHECK FOR CHANGES"
-        if [ -n ${CACHED_HASH+x} ] && [ $CACHED_HASH == $HASH ]; then
+        if [ -n "$CACHED_HASH" ] && [ "$CACHED_HASH" == "$HASH" ]; then
           echo "Hash unchanged, skipping rest of the action."
           echo "skip=true" >> $GITHUB_OUTPUT
         fi
