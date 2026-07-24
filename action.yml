@@ -36,6 +36,10 @@ inputs:
   dockerfile_path:
     description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. Multi-stage builds with additional FROM stages are supported. The file must not include a "# syntax=" directive (which must appear on line 1 of a Dockerfile). Defaults to .devpanel/Dockerfile if it exists.'
     required: false
+  cancel_run_on_skip:
+    description: 'Cancel the workflow run when the hash is unchanged (skip=true). Requires actions: write permission on GITHUB_TOKEN. Defaults to true.'
+    required: false
+    default: 'true'
 runs:
   using: "composite"
   steps:
@@ -281,7 +285,7 @@ runs:
       shell: bash
 
     - name: Cancel workflow run when hash is unchanged
-      if: steps.compare_hash.outputs.skip == 'true'
+      if: steps.compare_hash.outputs.skip == 'true' && inputs.cancel_run_on_skip == 'true'
       continue-on-error: true
       env:
         GH_TOKEN: ${{ github.token }}

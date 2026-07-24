@@ -44,7 +44,7 @@ Use this when you want to publish to Docker Hub:
 jobs:
   build-and-push:
     permissions:
-      actions: write
+      actions: write  # Optional: only needed when cancel_run_on_skip is enabled (the default)
     uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
     with:
       dockerhub_username: ${{ vars.DOCKERHUB_USERNAME }}
@@ -65,7 +65,7 @@ Use this when you want to publish to GHCR. This path is selected when Docker Hub
 jobs:
   build-and-push:
     permissions:
-      actions: write
+      actions: write  # Optional: only needed when cancel_run_on_skip is enabled (the default)
       contents: read
       packages: write
     uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
@@ -113,6 +113,7 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `base_image` (optional): Base Docker image to build from (default: `devpanel/php:8.3-base-rc`)
 - `dockerfile_path` (optional): Path to a Dockerfile (relative to the app root) whose instructions are appended to the base Dockerfile. Multi-stage builds with additional `FROM` stages are supported. The file must not include a `# syntax=` directive (which must appear on line 1 of a Dockerfile). If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
 - `composer_auth` (optional): Composer auth JSON for repositories that need private package access during init steps.
+- `cancel_run_on_skip` (optional): Cancel the workflow run when the hash is unchanged (`skip=true`). Defaults to `true`. Set to `false` to disable early cancellation. Requires `actions: write` on `GITHUB_TOKEN` when enabled.
 
 **Outputs:**
 
@@ -120,7 +121,7 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `skip`: Skip manifest generation
 - `image`: Image digest for this platform
 
-When `cached_hash` matches the computed `hash`, the action sets `skip=true` and attempts to cancel the current workflow run to stop sibling jobs in a matrix. For cancellation to succeed, the caller must grant `actions: write` to `GITHUB_TOKEN`. If that permission is missing, the action logs a warning and continues without failing the workflow.
+When `cached_hash` matches the computed `hash`, the action sets `skip=true`. If `cancel_run_on_skip` is `true` (the default), the action also attempts to cancel the current workflow run to stop sibling jobs in a matrix. For cancellation to succeed, the caller must grant `actions: write` to `GITHUB_TOKEN`. If that permission is missing, the action logs a warning and continues without failing the workflow. Set `cancel_run_on_skip: false` to opt out of run-wide cancellation.
 
 ### Manifest Action (`manifest/action.yml`)
 
