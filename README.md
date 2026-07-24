@@ -43,6 +43,8 @@ Use this when you want to publish to Docker Hub:
 ```yaml
 jobs:
   build-and-push:
+    permissions:
+      actions: write
     uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
     with:
       dockerhub_username: ${{ vars.DOCKERHUB_USERNAME }}
@@ -63,6 +65,7 @@ Use this when you want to publish to GHCR. This path is selected when Docker Hub
 jobs:
   build-and-push:
     permissions:
+      actions: write
       contents: read
       packages: write
     uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
@@ -75,7 +78,7 @@ jobs:
       composer_auth: ${{ secrets.COMPOSER_AUTH }}
 ```
 
-Keep this `permissions` block on the calling job whenever GHCR is a possible runtime outcome, including private repositories where Docker Hub credentials are present but the target Docker Hub repository does not already exist.
+Keep this `permissions` block on the calling job whenever GHCR is a possible runtime outcome, including private repositories where Docker Hub credentials are present but the target Docker Hub repository does not already exist. The `actions: write` permission is required only for the optional early-cancel behavior when a hash match is detected.
 
 If your repository is in the [Drupal Forge](https://github.com/drupalforge) organization, there will be a _Docker build and push template_ on the Actions tab that sets this up for you.
 
@@ -117,7 +120,7 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `skip`: Skip manifest generation
 - `image`: Image digest for this platform
 
-When `cached_hash` matches the computed `hash`, the action sets `skip=true` and cancels the current workflow run to stop sibling jobs in a matrix.
+When `cached_hash` matches the computed `hash`, the action sets `skip=true` and attempts to cancel the current workflow run to stop sibling jobs in a matrix. For cancellation to succeed, the caller must grant `actions: write` to `GITHUB_TOKEN`. If that permission is missing, the action logs a warning and continues without failing the workflow.
 
 ### Manifest Action (`manifest/action.yml`)
 
