@@ -30,11 +30,14 @@ inputs:
     description: 'Target platform for the build. Defaults to linux/amd64.'
     required: false
   base_image:
-    description: 'Base Docker image to build from. Defaults to devpanel/php:8.3-base-rc.'
+    description: 'Base Docker image to build from. Defaults to devpanel/php:8.3-base.'
     required: false
-    default: 'devpanel/php:8.3-base-rc'
+    default: 'devpanel/php:8.3-base'
+  prepend_dockerfile_path:
+    description: 'Path to a Dockerfile (relative to app root) whose instructions are prepended before the base Dockerfile. Multi-stage builds with additional FROM stages are supported here. Prepend files must declare their own ARG statements for any variables they use (for example, ARG BASE_IMAGE before FROM $BASE_IMAGE). The file must not include a "# syntax=" directive. Defaults to .devpanel/prepend.Dockerfile if it exists.'
+    required: false
   dockerfile_path:
-    description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. Multi-stage builds with additional FROM stages are supported. The file must not include a "# syntax=" directive (which must appear on line 1 of a Dockerfile). Defaults to .devpanel/Dockerfile if it exists.'
+    description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. This file can COPY --from stages defined in prepend_dockerfile_path. The file must not include a "# syntax=" directive. Defaults to .devpanel/Dockerfile if it exists.'
     required: false
   cancel_run_on_skip:
     description: 'Cancel the workflow run when the hash is unchanged (skip=true) unless set to false. Requires actions: write permission on GITHUB_TOKEN.'
@@ -99,44 +102,71 @@ runs:
       run: |
         set -e
         BASE_DOCKERFILE="${{ github.action_path }}/Dockerfile"
+        PREPEND_PATH="${{ inputs.prepend_dockerfile_path }}"
         CUSTOM_PATH="${{ inputs.dockerfile_path }}"
         COMBINED="/tmp/Dockerfile.combined"
         APP_ROOT="$(realpath app)"
-        if [ -n "$CUSTOM_PATH" ]; then
-          CUSTOM_RESOLVED="$(realpath "app/$CUSTOM_PATH" 2>/dev/null || true)"
-          if [ -z "$CUSTOM_RESOLVED" ]; then
-            echo "::error::dockerfile_path '$CUSTOM_PATH' could not be resolved under app root"
+
+        resolve_path() {
+          local candidate_path="$1"
+          local error_label="$2"
+          local resolved_path
+
+          resolved_path="$(realpath "app/$candidate_path" 2>/dev/null || true)"
+          if [ -z "$resolved_path" ]; then
+            echo "::error::$error_label '$candidate_path' could not be resolved under app root"
             exit 1
           fi
-          case "${CUSTOM_RESOLVED}/" in
-            "${APP_ROOT}/"*)
-              if [ -f "$CUSTOM_RESOLVED" ] && [ -r "$CUSTOM_RESOLVED" ]; then
-                if grep -qE '^# syntax=' "$CUSTOM_RESOLVED"; then
-                  echo "::error::dockerfile_path '$CUSTOM_PATH' must not contain a '# syntax=' directive (it must be on line 1 of a Dockerfile)"
-                  exit 1
-                fi
-                cat "$BASE_DOCKERFILE" "$CUSTOM_RESOLVED" > "$COMBINED"
-                echo "path=$COMBINED" >> $GITHUB_OUTPUT
-              else
-                echo "::error::dockerfile_path '$CUSTOM_PATH' is not a readable file"
-                exit 1
-              fi
-              ;;
+
+          case "${resolved_path}/" in
+            "${APP_ROOT}/"*) ;;
             *)
-              echo "::error::dockerfile_path '$CUSTOM_PATH' resolves outside the app root"
+              echo "::error::$error_label '$candidate_path' resolves outside the app root"
               exit 1
               ;;
           esac
-        elif [ -r "app/.devpanel/Dockerfile" ]; then
-          if grep -qE '^# syntax=' "app/.devpanel/Dockerfile"; then
-            echo "::error::app/.devpanel/Dockerfile must not contain a '# syntax=' directive (it must be on line 1 of a Dockerfile)"
+
+          if [ ! -f "$resolved_path" ] || [ ! -r "$resolved_path" ]; then
+            echo "::error::$error_label '$candidate_path' is not a readable file"
             exit 1
           fi
-          cat "$BASE_DOCKERFILE" "app/.devpanel/Dockerfile" > "$COMBINED"
-          echo "path=$COMBINED" >> $GITHUB_OUTPUT
-        else
-          echo "path=$BASE_DOCKERFILE" >> $GITHUB_OUTPUT
+
+          printf '%s' "$resolved_path"
+        }
+
+        PREPEND_RESOLVED=""
+        if [ -n "$PREPEND_PATH" ]; then
+          PREPEND_RESOLVED="$(resolve_path "$PREPEND_PATH" "prepend_dockerfile_path")"
+        elif [ -r "app/.devpanel/prepend.Dockerfile" ]; then
+          PREPEND_RESOLVED="app/.devpanel/prepend.Dockerfile"
         fi
+
+        if [ -n "$PREPEND_RESOLVED" ] && grep -qE '^# syntax=' "$PREPEND_RESOLVED"; then
+          echo "::error::prepend_dockerfile_path must not contain a '# syntax=' directive"
+          exit 1
+        fi
+
+        APPEND_RESOLVED=""
+        if [ -n "$CUSTOM_PATH" ]; then
+          APPEND_RESOLVED="$(resolve_path "$CUSTOM_PATH" "dockerfile_path")"
+        elif [ -r "app/.devpanel/Dockerfile" ]; then
+          APPEND_RESOLVED="app/.devpanel/Dockerfile"
+        fi
+
+        if [ -n "$APPEND_RESOLVED" ] && grep -qE '^# syntax=' "$APPEND_RESOLVED"; then
+          echo "::error::dockerfile_path must not contain a '# syntax=' directive"
+          exit 1
+        fi
+
+        : > "$COMBINED"
+        if [ -n "$PREPEND_RESOLVED" ]; then
+          cat "$PREPEND_RESOLVED" >> "$COMBINED"
+        fi
+        cat "$BASE_DOCKERFILE" >> "$COMBINED"
+        if [ -n "$APPEND_RESOLVED" ]; then
+          cat "$APPEND_RESOLVED" >> "$COMBINED"
+        fi
+        echo "path=$COMBINED" >> $GITHUB_OUTPUT
       shell: bash
 
     - name: Build image with cloud builder (no push, load to local Docker)
@@ -152,7 +182,7 @@ runs:
           APP_ROOT=/var/www/html
           APACHE_RUN_USER=www
           APACHE_RUN_GROUP=www
-          BASE_IMAGE=${{ inputs.base_image || 'devpanel/php:8.3-base-rc' }}
+          BASE_IMAGE=${{ inputs.base_image }}
         push: false
         load: true
 
@@ -172,7 +202,7 @@ runs:
           APP_ROOT=/var/www/html
           APACHE_RUN_USER=www
           APACHE_RUN_GROUP=www
-          BASE_IMAGE=${{ inputs.base_image || 'devpanel/php:8.3-base-rc' }}
+          BASE_IMAGE=${{ inputs.base_image }}
         push: false
         load: true
 
