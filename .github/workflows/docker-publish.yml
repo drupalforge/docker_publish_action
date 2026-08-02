@@ -15,7 +15,7 @@ on:
         required: false
         type: string
       base_image:
-        description: 'Base Docker image to build from. Defaults to devpanel/php:8.3-base.'
+        description: 'Base Docker image to build from. If omitted, the action leaves BASE_IMAGE unset so the Dockerfile default is used.'
         required: false
         type: string
       prepend_dockerfile_path:

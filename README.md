@@ -111,7 +111,7 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `files_to_hash` (optional): List of files to check for changes (default: `composer.lock`)
 - `cached_hash` (optional): Previously cached files hash for comparison
 - `build_platform` (optional): Target platform (e.g., `linux/amd64`, `linux/arm64`)
-- `base_image` (optional): Base Docker image to build from (default: `devpanel/php:8.3-base`)
+- `base_image` (optional): Base Docker image to build from. If omitted, the action does not pass `BASE_IMAGE`, so the Dockerfile default (`devpanel/php:8.3-base`) is used.
 - `prepend_dockerfile_path` (optional): Path to a Dockerfile (relative to the app root) whose instructions are prepended before the base Dockerfile. Multi-stage builds with additional `FROM` stages are supported here. The file must not include a `# syntax=` directive. If omitted and `.devpanel/prepend.Dockerfile` exists in the app root, that file is prepended automatically.
 - `dockerfile_path` (optional): Path to a Dockerfile (relative to the app root) whose instructions are appended to the base Dockerfile. This file can `COPY --from` stages defined in `prepend_dockerfile_path`. The file must not include a `# syntax=` directive (which must appear on line 1 of a Dockerfile). If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
 - `composer_auth` (optional): Composer auth JSON for repositories that need private package access during init steps.
