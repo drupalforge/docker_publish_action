@@ -18,6 +18,7 @@ on:
         description: 'Base Docker image to build from. Defaults to devpanel/php:8.3-base.'
         required: false
         type: string
+        default: 'devpanel/php:8.3-base'
       prepend_dockerfile_path:
         description: 'Path to a Dockerfile (relative to app root) whose instructions are prepended before the base Dockerfile. Multi-stage builds with additional FROM stages are supported here. Prepend files must declare their own ARG statements for any variables they use (for example, ARG BASE_IMAGE before FROM $BASE_IMAGE). Defaults to .devpanel/prepend.Dockerfile if it exists.'
         required: false
