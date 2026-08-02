@@ -19,4 +19,7 @@ RUN rm -rf -- "$APP_ROOT"
 # Copy application code
 COPY --chown=${APACHE_RUN_USER}:${APACHE_RUN_GROUP} . ${APP_ROOT}/
 
+# Install the PHP PostgreSQL extension.
+RUN docker-php-ext-install pgsql
+
 USER ${USER}
