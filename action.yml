@@ -30,8 +30,9 @@ inputs:
     description: 'Target platform for the build. Defaults to linux/amd64.'
     required: false
   base_image:
-    description: 'Base Docker image to build from. If omitted, no BASE_IMAGE build arg is passed and the Dockerfile default is used.'
+    description: 'Base Docker image to build from. Defaults to devpanel/php:8.3-base.'
     required: false
+    default: 'devpanel/php:8.3-base'
   prepend_dockerfile_path:
     description: 'Path to a Dockerfile (relative to app root) whose instructions are prepended before the base Dockerfile. Multi-stage builds with additional FROM stages are supported here. Prepend files must declare their own ARG statements for any variables they use (for example, ARG BASE_IMAGE before FROM $BASE_IMAGE). The file must not include a "# syntax=" directive. Defaults to .devpanel/prepend.Dockerfile if it exists.'
     required: false
@@ -168,21 +169,6 @@ runs:
         echo "path=$COMBINED" >> $GITHUB_OUTPUT
       shell: bash
 
-    - name: Resolve Docker build args
-      id: build_args
-      run: |
-        {
-          echo 'value<<EOF'
-          echo 'APP_ROOT=/var/www/html'
-          echo 'APACHE_RUN_USER=www'
-          echo 'APACHE_RUN_GROUP=www'
-          if [ -n "${{ inputs.base_image }}" ]; then
-            echo "BASE_IMAGE=${{ inputs.base_image }}"
-          fi
-          echo 'EOF'
-        } >> "$GITHUB_OUTPUT"
-      shell: bash
-
     - name: Build image with cloud builder (no push, load to local Docker)
       if: steps.buildx_cloud.outcome == 'success'
       id: build_image_cloud
@@ -192,7 +178,11 @@ runs:
         context: ./app
         file: ${{ steps.dockerfile.outputs.path }}
         platforms: ${{ inputs.build_platform }}
-        build-args: ${{ steps.build_args.outputs.value }}
+        build-args: |
+          APP_ROOT=/var/www/html
+          APACHE_RUN_USER=www
+          APACHE_RUN_GROUP=www
+          BASE_IMAGE=${{ inputs.base_image }}
         push: false
         load: true
 
@@ -208,7 +198,11 @@ runs:
         context: ./app
         file: ${{ steps.dockerfile.outputs.path }}
         platforms: ${{ inputs.build_platform || 'linux/amd64' }}
-        build-args: ${{ steps.build_args.outputs.value }}
+        build-args: |
+          APP_ROOT=/var/www/html
+          APACHE_RUN_USER=www
+          APACHE_RUN_GROUP=www
+          BASE_IMAGE=${{ inputs.base_image }}
         push: false
         load: true
 
