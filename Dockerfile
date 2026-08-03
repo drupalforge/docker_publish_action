@@ -30,10 +30,7 @@ RUN set -eux; \
       apt-get install -y --no-install-recommends libpq-dev pkg-config; \
       installed_pgsql_build_deps=1; \
     elif ! ( \
-      cat >/tmp/pqtest.c <<'EOF' && \
-#include <libpq-fe.h>
-int main(void){ return (int)PQlibVersion(); }
-EOF
+      printf '%s\n' '#include <libpq-fe.h>' 'int main(void){ return (int)PQlibVersion(); }' >/tmp/pqtest.c && \
       cc /tmp/pqtest.c -o /tmp/pqtest $(pkg-config --cflags --libs libpq 2>/dev/null || echo -lpq) \
     ); then \
       apt-get update; \
