@@ -75,13 +75,14 @@ runs:
     - name: Copy app root from first-arch image and push
       id: push_image
       run: |
+        set -euo pipefail
         FIRST_ARCH_IMAGE="${{ inputs.first_arch_image }}"
         FIRST_ARCH_PLATFORM="${{ inputs.first_arch_platform }}"
         PREP_IMAGE="${{ inputs.prep_image }}"
 
         docker pull --platform "$FIRST_ARCH_PLATFORM" "$FIRST_ARCH_IMAGE"
         FIRST_ARCH_CONTAINER=$(docker create --platform "$FIRST_ARCH_PLATFORM" "$FIRST_ARCH_IMAGE")
-        APP_ROOT=$(docker inspect "$FIRST_ARCH_CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^APP_ROOT=' | cut -d= -f2- | tr -d '[:space:]')
+        APP_ROOT=$(docker inspect "$FIRST_ARCH_CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^APP_ROOT=' | cut -d= -f2- | tr -d '[:space:]' || true)
         if [ -z "$APP_ROOT" ]; then
           APP_ROOT="/var/www/html"
         fi
@@ -104,15 +105,19 @@ runs:
         docker exec "$WEBSERVER" bash -c "rm -rf '${APP_ROOT}' && mkdir -p '${APP_ROOT}'"
         docker cp /tmp/first_arch_app_root/. "${WEBSERVER}:${APP_ROOT}/"
 
-        docker commit "$WEBSERVER" "$IMAGE_REPO:${{ inputs.ref_name }}"
-        docker push "$IMAGE_REPO:${{ inputs.ref_name }}"
-        IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_REPO:${{ inputs.ref_name }}")
-        echo "image=$IMAGE" >> $GITHUB_OUTPUT
-
         ARCH_SAFE="${{ inputs.arch }}"
         ARCH_SAFE="${ARCH_SAFE//\//_}"
+        ARCH_TAG="$IMAGE_REPO:${{ inputs.ref_name }}-${ARCH_SAFE}"
+
+        docker commit "$WEBSERVER" "$ARCH_TAG"
+        docker stop "$WEBSERVER"
+        docker push "$ARCH_TAG"
+        IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' "$ARCH_TAG")
+        echo "image=$IMAGE" >> $GITHUB_OUTPUT
+
         echo "arch_safe=$ARCH_SAFE" >> $GITHUB_OUTPUT
       shell: bash
+
 
     - name: Set GHCR package visibility
       if: inputs.use_dockerhub != 'true' && inputs.repository_private == 'false'
