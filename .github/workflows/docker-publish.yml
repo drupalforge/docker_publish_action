@@ -122,7 +122,7 @@ jobs:
           fi
         shell: bash
 
-  build-and-push:
+  build-amd64:
     needs: [retrieve-files-hash, determine-registry]
     runs-on: ubuntu-latest
     services:
@@ -140,11 +140,6 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
-    strategy:
-      matrix:
-        arch:
-          - linux/amd64
-          - linux/arm64
     steps:
       - name: Publish image
         id: publish
@@ -159,7 +154,7 @@ jobs:
           image_repo: ${{ inputs.image_repo || github.repository }}
           files_to_hash: ${{ inputs.files_to_hash || null }}
           cached_hash: ${{ needs.retrieve-files-hash.outputs.cached_hash || null }}
-          build_platform: ${{ matrix.arch }}
+          build_platform: linux/amd64
           base_image: ${{ inputs.base_image || null }}
           prepend_dockerfile_path: ${{ inputs.prepend_dockerfile_path || null }}
           dockerfile_path: ${{ inputs.dockerfile_path || null }}
@@ -168,24 +163,218 @@ jobs:
         if: steps.publish.outputs.skip != 'true'
         id: save_image_id
         run: |
-          ARCH_SAFE="${{ matrix.arch }}"
-          ARCH_SAFE="${ARCH_SAFE//\//_}"
-          echo "arch_safe=$ARCH_SAFE" >> $GITHUB_OUTPUT
-          echo '{ "${{ matrix.arch }}": "${{ steps.publish.outputs.image }}" }' > "${ARCH_SAFE}-image_id.json"
+          echo '{ "linux/amd64": "${{ steps.publish.outputs.image }}" }' > linux_amd64-image_id.json
+        shell: bash
 
       - name: Upload artifact with image ID
         if: steps.publish.outputs.skip != 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: ${{ steps.save_image_id.outputs.arch_safe }}-image_id
-          path: ${{ steps.save_image_id.outputs.arch_safe }}-image_id.json
+          name: linux_amd64-image_id
+          path: linux_amd64-image_id.json
     outputs:
       hash: ${{ steps.publish.outputs.hash }}
       skip: ${{ steps.publish.outputs.skip }}
+      image: ${{ steps.publish.outputs.image }}
+
+  build-other-arch:
+    needs: [build-amd64, determine-registry]
+    if: needs.build-amd64.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch:
+          - linux/arm64
+    steps:
+      - name: Check out action repository for base Dockerfile
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: drupalforge/docker_publish_action
+          ref: main
+          path: action-repo
+
+      - name: Check out app code
+        uses: actions/checkout@v6.0.2
+        with:
+          path: app
+
+      - name: Log in to Docker Hub
+        if: needs.determine-registry.outputs.use_dockerhub == 'true'
+        uses: docker/login-action@v4.1.0
+        with:
+          username: ${{ inputs.dockerhub_username }}
+          password: ${{ secrets.dockerhub_token }}
+
+      - name: Log in to GitHub Container Registry
+        if: needs.determine-registry.outputs.use_dockerhub != 'true'
+        uses: docker/login-action@v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set IMAGE_REPO variable
+        run: |
+          if [ "${{ needs.determine-registry.outputs.use_dockerhub }}" = "true" ]; then
+            echo "IMAGE_REPO=${{ inputs.image_repo || github.repository }}" >> $GITHUB_ENV
+          else
+            RAW="${{ inputs.image_repo || github.repository }}"
+            echo "IMAGE_REPO=ghcr.io/$(echo "$RAW" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          fi
+        shell: bash
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.0.0
+
+      - name: Determine Dockerfile to use
+        id: dockerfile
+        run: |
+          set -e
+          BASE_DOCKERFILE="./action-repo/Dockerfile"
+          PREPEND_PATH="${{ inputs.prepend_dockerfile_path }}"
+          CUSTOM_PATH="${{ inputs.dockerfile_path }}"
+          COMBINED="/tmp/Dockerfile.combined"
+          APP_ROOT="$(realpath app)"
+
+          resolve_path() {
+            local candidate_path="$1"
+            local error_label="$2"
+            local resolved_path
+
+            resolved_path="$(realpath "app/$candidate_path" 2>/dev/null || true)"
+            if [ -z "$resolved_path" ]; then
+              echo "::error::$error_label '$candidate_path' could not be resolved under app root"
+              exit 1
+            fi
+
+            case "${resolved_path}/" in
+              "${APP_ROOT}/"*) ;;
+              *)
+                echo "::error::$error_label '$candidate_path' resolves outside the app root"
+                exit 1
+                ;;
+            esac
+
+            if [ ! -f "$resolved_path" ] || [ ! -r "$resolved_path" ]; then
+              echo "::error::$error_label '$candidate_path' is not a readable file"
+              exit 1
+            fi
+
+            printf '%s' "$resolved_path"
+          }
+
+          PREPEND_RESOLVED=""
+          if [ -n "$PREPEND_PATH" ]; then
+            PREPEND_RESOLVED="$(resolve_path "$PREPEND_PATH" "prepend_dockerfile_path")"
+          elif [ -r "app/.devpanel/prepend.Dockerfile" ]; then
+            PREPEND_RESOLVED="app/.devpanel/prepend.Dockerfile"
+          fi
+
+          if [ -n "$PREPEND_RESOLVED" ] && grep -qE '^# syntax=' "$PREPEND_RESOLVED"; then
+            echo "::error::prepend_dockerfile_path must not contain a '# syntax=' directive"
+            exit 1
+          fi
+
+          APPEND_RESOLVED=""
+          if [ -n "$CUSTOM_PATH" ]; then
+            APPEND_RESOLVED="$(resolve_path "$CUSTOM_PATH" "dockerfile_path")"
+          elif [ -r "app/.devpanel/Dockerfile" ]; then
+            APPEND_RESOLVED="app/.devpanel/Dockerfile"
+          fi
+
+          if [ -n "$APPEND_RESOLVED" ] && grep -qE '^# syntax=' "$APPEND_RESOLVED"; then
+            echo "::error::dockerfile_path must not contain a '# syntax=' directive"
+            exit 1
+          fi
+
+          : > "$COMBINED"
+          if [ -n "$PREPEND_RESOLVED" ]; then
+            cat "$PREPEND_RESOLVED" >> "$COMBINED"
+          fi
+          cat "$BASE_DOCKERFILE" >> "$COMBINED"
+          if [ -n "$APPEND_RESOLVED" ]; then
+            cat "$APPEND_RESOLVED" >> "$COMBINED"
+          fi
+          echo "path=$COMBINED" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Build arch-specific image
+        id: build_image
+        uses: docker/build-push-action@v7.1.0
+        with:
+          context: ./app
+          file: ${{ steps.dockerfile.outputs.path }}
+          platforms: ${{ matrix.arch }}
+          build-args: |
+            APP_ROOT=/var/www/html
+            APACHE_RUN_USER=www
+            APACHE_RUN_GROUP=www
+            BASE_IMAGE=${{ inputs.base_image || 'devpanel/php:8.3-base' }}
+          push: false
+          load: true
+
+      - name: Copy app root from amd64 image and push
+        id: push_image
+        run: |
+          AMD64_IMAGE="${{ needs.build-amd64.outputs.image }}"
+          docker pull --platform linux/amd64 "$AMD64_IMAGE"
+          AMD64_CONTAINER=$(docker create --platform linux/amd64 "$AMD64_IMAGE")
+          APP_ROOT=$(docker inspect "$AMD64_CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^APP_ROOT=' | cut -d= -f2- | tr -d '[:space:]')
+          if [ -z "$APP_ROOT" ]; then
+            APP_ROOT="/var/www/html"
+          fi
+
+          mkdir -p /tmp/amd64_app_root
+          docker cp "${AMD64_CONTAINER}:${APP_ROOT}/." /tmp/amd64_app_root/
+          docker rm "$AMD64_CONTAINER"
+
+          WEBSERVER=$(docker run -d             -e DP_APP_ID="$IMAGE_REPO"             -e APP_ROOT="$APP_ROOT"             -e WEB_ROOT="${APP_ROOT}/web"             -e APACHE_RUN_USER="www"             -e APACHE_RUN_GROUP="www"             -e CODES_ENABLE="no"             "${{ steps.build_image.outputs.imageid }}")
+
+          docker exec "$WEBSERVER" bash -c "rm -rf '${APP_ROOT}' && mkdir -p '${APP_ROOT}'"
+          docker cp /tmp/amd64_app_root/. "${WEBSERVER}:${APP_ROOT}/"
+
+          docker commit "$WEBSERVER" "$IMAGE_REPO:${{ github.ref_name }}"
+          docker push "$IMAGE_REPO:${{ github.ref_name }}"
+          IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_REPO:${{ github.ref_name }}")
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Set GHCR package visibility
+        if: needs.determine-registry.outputs.use_dockerhub != 'true' && github.event.repository.private == false
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PACKAGE_NAME=$(echo "$IMAGE_REPO" | sed 's|ghcr.io/[^/]*/||')
+          OWNER="${{ github.repository_owner }}"
+          OWNER_TYPE=$(gh api "/users/$OWNER" --jq '.type')
+          if [ "$OWNER_TYPE" = "Organization" ]; then
+            gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE_NAME" -f visibility=public || true
+          else
+            gh api -X PATCH "/user/packages/container/$PACKAGE_NAME" -f visibility=public || true
+          fi
+        shell: bash
+
+      - name: Save image ID to file
+        id: save_image_id
+        run: |
+          ARCH_SAFE="${{ matrix.arch }}"
+          ARCH_SAFE="${ARCH_SAFE//\//_}"
+          echo "arch_safe=$ARCH_SAFE" >> $GITHUB_OUTPUT
+          echo '{ "${{ matrix.arch }}": "${{ steps.push_image.outputs.image }}" }' > "${ARCH_SAFE}-image_id.json"
+        shell: bash
+
+      - name: Upload artifact with image ID
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ${{ steps.save_image_id.outputs.arch_safe }}-image_id
+          path: ${{ steps.save_image_id.outputs.arch_safe }}-image_id.json
 
   create-manifest:
-    needs: [build-and-push, determine-registry]
-    if: needs.build-and-push.outputs.skip != 'true'
+    needs: [build-amd64, build-other-arch, determine-registry]
+    if: needs.build-amd64.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download image ID artifact
@@ -210,8 +399,8 @@ jobs:
   store-files-hash:
     needs:
       - retrieve-files-hash
-      - build-and-push
-    if: needs.build-and-push.result == 'success' && needs.build-and-push.outputs.skip != 'true'
+      - build-amd64
+    if: needs.build-amd64.result == 'success' && needs.build-amd64.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -229,7 +418,7 @@ jobs:
       - name: Save new hash to cache file
         id: save_hash_file
         run: |
-          echo "${{ needs.build-and-push.outputs.hash }}" > .files_hash.cache
+          echo "${{ needs.build-amd64.outputs.hash }}" > .files_hash.cache
         shell: bash
 
       - name: Save hash to cache
