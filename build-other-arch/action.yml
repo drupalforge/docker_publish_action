@@ -1,0 +1,135 @@
+name: 'Build other-arch image'
+description: 'Copies the app root from the first-arch image into a pre-built arch-specific image and pushes the final image.'
+inputs:
+  arch:
+    description: 'Target platform (e.g. linux/arm64).'
+    required: true
+  prep_image:
+    description: 'Intermediate image tag produced by prepare-other-arch (already built for this arch).'
+    required: true
+  first_arch_image:
+    description: 'Digest of the first-arch image to copy the app root from.'
+    required: true
+  first_arch_platform:
+    description: 'Platform string of the first-arch image (e.g. linux/amd64).'
+    required: true
+  use_dockerhub:
+    description: 'Whether to push to Docker Hub instead of GHCR.'
+    required: true
+  dockerhub_username:
+    description: 'Docker Hub username.'
+    required: false
+  dockerhub_token:
+    description: 'Docker Hub token.'
+    required: false
+  image_repo:
+    description: 'Image repository (without registry prefix for Docker Hub, or full path for GHCR).'
+    required: true
+  ref_name:
+    description: 'Git ref name used as the image tag.'
+    required: true
+  repository_owner:
+    description: 'GitHub repository owner.'
+    required: true
+  repository_private:
+    description: 'Whether the GitHub repository is private.'
+    required: true
+outputs:
+  image:
+    description: 'Pushed image digest.'
+    value: ${{ steps.push_image.outputs.image }}
+  arch_safe:
+    description: 'Filesystem-safe arch string (slashes replaced with underscores).'
+    value: ${{ steps.push_image.outputs.arch_safe }}
+runs:
+  using: composite
+  steps:
+    - name: Log in to Docker Hub
+      if: inputs.use_dockerhub == 'true'
+      uses: docker/login-action@v4.1.0
+      with:
+        username: ${{ inputs.dockerhub_username }}
+        password: ${{ inputs.dockerhub_token }}
+
+    - name: Log in to GitHub Container Registry
+      if: inputs.use_dockerhub != 'true'
+      uses: docker/login-action@v4.1.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Set IMAGE_REPO variable
+      run: |
+        if [ "${{ inputs.use_dockerhub }}" = "true" ]; then
+          echo "IMAGE_REPO=${{ inputs.image_repo }}" >> $GITHUB_ENV
+        else
+          RAW="${{ inputs.image_repo }}"
+          echo "IMAGE_REPO=ghcr.io/$(echo "$RAW" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+        fi
+      shell: bash
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v4.0.0
+
+    - name: Copy app root from first-arch image and push
+      id: push_image
+      run: |
+        set -euo pipefail
+        FIRST_ARCH_IMAGE="${{ inputs.first_arch_image }}"
+        FIRST_ARCH_PLATFORM="${{ inputs.first_arch_platform }}"
+        PREP_IMAGE="${{ inputs.prep_image }}"
+
+        docker pull --platform "$FIRST_ARCH_PLATFORM" "$FIRST_ARCH_IMAGE"
+        FIRST_ARCH_CONTAINER=$(docker create --platform "$FIRST_ARCH_PLATFORM" "$FIRST_ARCH_IMAGE")
+        APP_ROOT=$(docker inspect "$FIRST_ARCH_CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^APP_ROOT=' | cut -d= -f2- | tr -d '[:space:]' || true)
+        if [ -z "$APP_ROOT" ]; then
+          APP_ROOT="/var/www/html"
+        fi
+
+        mkdir -p /tmp/first_arch_app_root
+        docker cp "${FIRST_ARCH_CONTAINER}:${APP_ROOT}/." /tmp/first_arch_app_root/
+        docker rm "$FIRST_ARCH_CONTAINER"
+
+        docker pull --platform "${{ inputs.arch }}" "$PREP_IMAGE"
+        WEBSERVER=$(docker run -d \
+          --platform "${{ inputs.arch }}" \
+          -e DP_APP_ID="$IMAGE_REPO" \
+          -e APP_ROOT="$APP_ROOT" \
+          -e WEB_ROOT="${APP_ROOT}/web" \
+          -e APACHE_RUN_USER="www" \
+          -e APACHE_RUN_GROUP="www" \
+          -e CODES_ENABLE="no" \
+          "$PREP_IMAGE")
+
+        docker exec "$WEBSERVER" bash -c "rm -rf '${APP_ROOT}' && mkdir -p '${APP_ROOT}'"
+        docker cp /tmp/first_arch_app_root/. "${WEBSERVER}:${APP_ROOT}/"
+
+        ARCH_SAFE="${{ inputs.arch }}"
+        ARCH_SAFE="${ARCH_SAFE//\//_}"
+        ARCH_TAG="$IMAGE_REPO:${{ inputs.ref_name }}-${ARCH_SAFE}"
+
+        docker commit "$WEBSERVER" "$ARCH_TAG"
+        docker stop "$WEBSERVER"
+        docker push "$ARCH_TAG"
+        IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' "$ARCH_TAG")
+        echo "image=$IMAGE" >> $GITHUB_OUTPUT
+
+        echo "arch_safe=$ARCH_SAFE" >> $GITHUB_OUTPUT
+      shell: bash
+
+
+    - name: Set GHCR package visibility
+      if: inputs.use_dockerhub != 'true' && inputs.repository_private == 'false'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        PACKAGE_NAME=$(echo "$IMAGE_REPO" | sed 's|ghcr.io/[^/]*/||')
+        OWNER="${{ inputs.repository_owner }}"
+        OWNER_TYPE=$(gh api "/users/$OWNER" --jq '.type')
+        if [ "$OWNER_TYPE" = "Organization" ]; then
+          gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE_NAME" -f visibility=public || true
+        else
+          gh api -X PATCH "/user/packages/container/$PACKAGE_NAME" -f visibility=public || true
+        fi
+      shell: bash

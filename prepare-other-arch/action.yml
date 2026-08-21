@@ -1,0 +1,199 @@
+name: 'Prepare other-arch image'
+description: 'Builds an architecture-specific image (without app root) and pushes it to an intermediate tag.'
+inputs:
+  arch:
+    description: 'Target platform (e.g. linux/arm64).'
+    required: true
+  use_dockerhub:
+    description: 'Whether to push to Docker Hub instead of GHCR.'
+    required: true
+  dockerhub_username:
+    description: 'Docker Hub username.'
+    required: false
+  dockerhub_token:
+    description: 'Docker Hub token.'
+    required: false
+  image_repo:
+    description: 'Image repository (without registry prefix for Docker Hub, or full path for GHCR).'
+    required: true
+  ref_name:
+    description: 'Git ref name used as the image tag.'
+    required: true
+  repository_owner:
+    description: 'GitHub repository owner.'
+    required: true
+  repository_private:
+    description: 'Whether the GitHub repository is private.'
+    required: true
+  prepend_dockerfile_path:
+    description: 'Path to a Dockerfile (relative to app root) whose instructions are prepended before the base Dockerfile.'
+    required: false
+  dockerfile_path:
+    description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile.'
+    required: false
+  base_image:
+    description: 'Base Docker image to build from. Defaults to devpanel/php:8.3-base.'
+    required: false
+    default: 'devpanel/php:8.3-base'
+outputs:
+  prep_tag:
+    description: 'Intermediate image tag pushed to the registry.'
+    value: ${{ steps.push_prep.outputs.prep_tag }}
+  arch_safe:
+    description: 'Filesystem-safe arch string (slashes replaced with underscores).'
+    value: ${{ steps.push_prep.outputs.arch_safe }}
+runs:
+  using: composite
+  steps:
+    - name: Check out action repository for base Dockerfile
+      uses: actions/checkout@v6.0.2
+      with:
+        repository: drupalforge/docker_publish_action
+        ref: main
+        path: action-repo
+
+    - name: Check out app code
+      uses: actions/checkout@v6.0.2
+      with:
+        path: app
+
+    - name: Log in to Docker Hub
+      if: inputs.use_dockerhub == 'true'
+      uses: docker/login-action@v4.1.0
+      with:
+        username: ${{ inputs.dockerhub_username }}
+        password: ${{ inputs.dockerhub_token }}
+
+    - name: Log in to GitHub Container Registry
+      if: inputs.use_dockerhub != 'true'
+      uses: docker/login-action@v4.1.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Set IMAGE_REPO variable
+      run: |
+        if [ "${{ inputs.use_dockerhub }}" = "true" ]; then
+          echo "IMAGE_REPO=${{ inputs.image_repo }}" >> $GITHUB_ENV
+        else
+          RAW="${{ inputs.image_repo }}"
+          echo "IMAGE_REPO=ghcr.io/$(echo "$RAW" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+        fi
+      shell: bash
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v4.0.0
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.0.0
+
+    - name: Determine Dockerfile to use
+      id: dockerfile
+      run: |
+        set -e
+        BASE_DOCKERFILE="./action-repo/Dockerfile"
+        PREPEND_PATH="${{ inputs.prepend_dockerfile_path }}"
+        CUSTOM_PATH="${{ inputs.dockerfile_path }}"
+        COMBINED="/tmp/Dockerfile.combined"
+        APP_ROOT="$(realpath app)"
+
+        resolve_path() {
+          local candidate_path="$1"
+          local error_label="$2"
+          local resolved_path
+
+          resolved_path="$(realpath "app/$candidate_path" 2>/dev/null || true)"
+          if [ -z "$resolved_path" ]; then
+            echo "::error::$error_label '$candidate_path' could not be resolved under app root"
+            exit 1
+          fi
+
+          case "${resolved_path}/" in
+            "${APP_ROOT}/"*) ;;
+            *)
+              echo "::error::$error_label '$candidate_path' resolves outside the app root"
+              exit 1
+              ;;
+          esac
+
+          if [ ! -f "$resolved_path" ] || [ ! -r "$resolved_path" ]; then
+            echo "::error::$error_label '$candidate_path' is not a readable file"
+            exit 1
+          fi
+
+          printf '%s' "$resolved_path"
+        }
+
+        PREPEND_RESOLVED=""
+        if [ -n "$PREPEND_PATH" ]; then
+          PREPEND_RESOLVED="$(resolve_path "$PREPEND_PATH" "prepend_dockerfile_path")"
+        elif [ -r "app/.devpanel/prepend.Dockerfile" ]; then
+          PREPEND_RESOLVED="app/.devpanel/prepend.Dockerfile"
+        fi
+
+        if [ -n "$PREPEND_RESOLVED" ] && grep -qE '^# syntax=' "$PREPEND_RESOLVED"; then
+          echo "::error::prepend_dockerfile_path must not contain a '# syntax=' directive"
+          exit 1
+        fi
+
+        APPEND_RESOLVED=""
+        if [ -n "$CUSTOM_PATH" ]; then
+          APPEND_RESOLVED="$(resolve_path "$CUSTOM_PATH" "dockerfile_path")"
+        elif [ -r "app/.devpanel/Dockerfile" ]; then
+          APPEND_RESOLVED="app/.devpanel/Dockerfile"
+        fi
+
+        if [ -n "$APPEND_RESOLVED" ] && grep -qE '^# syntax=' "$APPEND_RESOLVED"; then
+          echo "::error::dockerfile_path must not contain a '# syntax=' directive"
+          exit 1
+        fi
+
+        : > "$COMBINED"
+        if [ -n "$PREPEND_RESOLVED" ]; then
+          cat "$PREPEND_RESOLVED" >> "$COMBINED"
+        fi
+        cat "$BASE_DOCKERFILE" >> "$COMBINED"
+        if [ -n "$APPEND_RESOLVED" ]; then
+          cat "$APPEND_RESOLVED" >> "$COMBINED"
+        fi
+        echo "path=$COMBINED" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Build arch-specific image and push to intermediate tag
+      id: push_prep
+      run: |
+        set -e
+        ARCH_SAFE="${{ inputs.arch }}"
+        ARCH_SAFE="${ARCH_SAFE//\//_}"
+        PREP_TAG="${IMAGE_REPO}:${{ inputs.ref_name }}-${ARCH_SAFE}-prep"
+
+        docker buildx build \
+          --platform "${{ inputs.arch }}" \
+          --build-arg APP_ROOT=/var/www/html \
+          --build-arg APACHE_RUN_USER=www \
+          --build-arg APACHE_RUN_GROUP=www \
+          --build-arg BASE_IMAGE="${{ inputs.base_image }}" \
+          --file "${{ steps.dockerfile.outputs.path }}" \
+          --tag "$PREP_TAG" \
+          --push \
+          ./app
+
+        echo "prep_tag=$PREP_TAG" >> $GITHUB_OUTPUT
+        echo "arch_safe=$ARCH_SAFE" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Set GHCR package visibility
+      if: inputs.use_dockerhub != 'true' && inputs.repository_private == 'false'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        PACKAGE_NAME=$(echo "$IMAGE_REPO" | sed 's|ghcr.io/[^/]*/||')
+        OWNER="${{ inputs.repository_owner }}"
+        OWNER_TYPE=$(gh api "/users/$OWNER" --jq '.type')
+        if [ "$OWNER_TYPE" = "Organization" ]; then
+          gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE_NAME" -f visibility=public || true
+        else
+          gh api -X PATCH "/user/packages/container/$PACKAGE_NAME" -f visibility=public || true
+        fi
+      shell: bash
