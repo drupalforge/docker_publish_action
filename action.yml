@@ -78,8 +78,20 @@ runs:
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v4.0.0
 
+    - name: Detect runner native platform
+      id: native_platform
+      run: |
+        ARCH=$(uname -m)
+        case "$ARCH" in
+          x86_64)  echo "platform=linux/amd64" >> $GITHUB_OUTPUT ;;
+          aarch64) echo "platform=linux/arm64" >> $GITHUB_OUTPUT ;;
+          armv7l)  echo "platform=linux/arm/v7" >> $GITHUB_OUTPUT ;;
+          *)       echo "platform=linux/$ARCH" >> $GITHUB_OUTPUT ;;
+        esac
+      shell: bash
+
     - name: Try Docker Buildx Cloud builder
-      if: inputs.build_platform && inputs.build_platform != 'linux/amd64' && steps.registry.outputs.use_dockerhub == 'true'
+      if: inputs.build_platform && inputs.build_platform != steps.native_platform.outputs.platform && steps.registry.outputs.use_dockerhub == 'true'
       id: buildx_cloud
       continue-on-error: true
       uses: docker/setup-buildx-action@v4.0.0
