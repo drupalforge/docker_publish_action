@@ -27,6 +27,11 @@ on:
         description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. This file can COPY --from stages defined in prepend_dockerfile_path. Defaults to .devpanel/Dockerfile if it exists.'
         required: false
         type: string
+      platforms:
+        description: 'Comma-separated list of target platforms. The first listed platform is built separately (with full functional tests); remaining platforms are built in parallel. Defaults to linux/amd64,linux/arm64.'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
     secrets:
       dockerhub_token:
         description: 'Docker Hub token'
