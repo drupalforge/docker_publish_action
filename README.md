@@ -21,6 +21,8 @@ This project provides GitHub Actions and workflows for building, publishing, and
 
 This section applies to the reusable workflow at `.github/workflows/docker-publish.yml`.
 
+The workflow builds `linux/amd64` on `ubuntu-26.04` and `linux/arm64` on the native `ubuntu-26.04-arm` runner, avoiding QEMU emulation for ARM builds.
+
 The reusable workflow chooses the target registry automatically:
 
 - If either `dockerhub_username` or `dockerhub_token` is missing, it uses GHCR.
