@@ -56,7 +56,11 @@ jobs:
       base_image: devpanel/php:8.5-base
     secrets:
       dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
-      init_env: ${{ secrets.INIT_ENV }}
+      init_env: |
+        {
+          "OPENAI_KEY": ${{ toJSON(secrets.OPENAI_KEY) }},
+          "SERVICE_TOKEN": ${{ toJSON(secrets.SERVICE_TOKEN) }}
+        }
 ```
 
 ### GHCR path
@@ -76,7 +80,11 @@ jobs:
       files_to_hash: composer.lock package.json
       base_image: devpanel/php:8.5-base
     secrets:
-      init_env: ${{ secrets.INIT_ENV }}
+      init_env: |
+        {
+          "OPENAI_KEY": ${{ toJSON(secrets.OPENAI_KEY) }},
+          "SERVICE_TOKEN": ${{ toJSON(secrets.SERVICE_TOKEN) }}
+        }
 ```
 
 Keep this `permissions` block on the calling job whenever GHCR is a possible runtime outcome, including private repositories where Docker Hub credentials are present but the target Docker Hub repository does not already exist. The `actions: write` permission is required only for the optional early-cancel behavior when a hash match is detected.
@@ -85,17 +93,7 @@ If your repository is in the [Drupal Forge](https://github.com/drupalforge) orga
 
 ### Initialization environment variables
 
-Store a JSON object containing multiple variables in a repository secret named `INIT_ENV`, for example:
-
-```json
-{
-  "OPENAI_KEY": "your-api-key",
-  "SERVICE_TOKEN": "your-service-token",
-  "SERVICE_URL": "https://example.com"
-}
-```
-
-Pass the secret directly to the reusable workflow (do not use `toJSON`, which would encode the JSON object as a string):
+Store values as individual repository secrets, such as `OPENAI_KEY` and `SERVICE_TOKEN`, and assemble the JSON object in the calling workflow. Each secret can then be updated independently, without maintaining a combined `INIT_ENV` secret:
 
 ```yaml
 jobs:
@@ -105,28 +103,43 @@ jobs:
       packages: write
     uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
     secrets:
-      init_env: ${{ secrets.INIT_ENV }}
+      init_env: |
+        {
+          "OPENAI_KEY": ${{ toJSON(secrets.OPENAI_KEY) }},
+          "SERVICE_TOKEN": ${{ toJSON(secrets.SERVICE_TOKEN) }},
+          "SERVICE_URL": "https://example.com"
+        }
 ```
+
+Apply `toJSON` to each secret value, without adding quotes around the expression. This safely escapes quotes, backslashes, and other JSON characters, including those in a single-line Composer auth JSON secret. Include only the secrets needed for initialization; do not pass `toJSON(secrets)`, which would forward unrelated credentials. A missing secret evaluates to an empty string, so omit its entry if you want to use a legacy fallback instead.
 
 For standalone composite action usage, pass it as an input instead:
 
 ```yaml
 - uses: drupalforge/docker_publish_action@main
   with:
-    init_env: ${{ secrets.INIT_ENV }}
+    init_env: |
+      {
+        "OPENAI_KEY": ${{ toJSON(secrets.OPENAI_KEY) }},
+        "SERVICE_TOKEN": ${{ toJSON(secrets.SERVICE_TOKEN) }}
+      }
 ```
+
+An existing combined JSON secret is still supported via `init_env: ${{ secrets.INIT_ENV }}`. Pass it directly, without `toJSON`, to avoid encoding the entire object as a JSON string.
 
 Omitting `init_env`, an empty input, and `{}` all add no variables. Otherwise, the input must be a single JSON object with string values and variable names matching `[A-Za-z_][A-Za-z0-9_]*`. Empty strings are allowed; CR, LF (multiline values), and NUL characters are not supported by Docker's environment-file format and are rejected. Invalid input fails without printing its contents.
 
 Values are masked in subsequent workflow logs and written to a temporary permission-restricted environment file, removed when the initialization step exits, including on failure. They are passed only to the `docker exec` command running `.devpanel/init.sh`, not to Docker builds, container startup, later dump commands, or the published image's environment. Caller variables override the default database variables for initialization.
 
-The `dp_ai_virtual_key` and `composer_auth` workflow secrets and action inputs are deprecated but retained for compatibility. Move their values into `init_env` under `DP_AI_VIRTUAL_KEY` and `COMPOSER_AUTH`, respectively. Each key present in `init_env` takes precedence over its legacy input, including when its value is an empty string. If a key is absent, its legacy input remains the fallback. For `COMPOSER_AUTH`, use a single-line JSON string as the value, for example:
+The `dp_ai_virtual_key` and `composer_auth` workflow secrets and action inputs are deprecated but retained for compatibility. Reference the existing individual secrets in `init_env` under `DP_AI_VIRTUAL_KEY` and `COMPOSER_AUTH`, respectively. Each key present in `init_env` takes precedence over its legacy input, including when its value is an empty string. If a key is absent, its legacy input remains the fallback. Keep the `COMPOSER_AUTH` secret as single-line JSON:
 
-```json
-{
-  "DP_AI_VIRTUAL_KEY": "your-virtual-key",
-  "COMPOSER_AUTH": "{\"http-basic\":{\"example.com\":{\"username\":\"user\",\"password\":\"token\"}}}"
-}
+```yaml
+secrets:
+  init_env: |
+    {
+      "DP_AI_VIRTUAL_KEY": ${{ toJSON(secrets.DP_AI_VIRTUAL_KEY) }},
+      "COMPOSER_AUTH": ${{ toJSON(secrets.COMPOSER_AUTH) }}
+    }
 ```
 
 Initialization scripts must not print transformed secrets or write secrets into files: filesystem changes made during initialization are included in the published image.
