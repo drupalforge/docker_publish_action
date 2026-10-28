@@ -32,10 +32,10 @@ on:
         description: 'Docker Hub token'
         required: false
       dp_ai_virtual_key:
-        description: 'DevPanel AI Virtual Key'
+        description: 'Deprecated: use DP_AI_VIRTUAL_KEY in init_env. Retained as a fallback for compatibility.'
         required: false
       composer_auth:
-        description: 'Composer auth JSON for private package access during init steps'
+        description: 'Deprecated: use COMPOSER_AUTH in init_env. Retained as a fallback for compatibility.'
         required: false
       init_env:
         description: 'JSON object of string environment variables passed only to init.sh at runtime'

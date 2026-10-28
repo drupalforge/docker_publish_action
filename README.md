@@ -56,8 +56,7 @@ jobs:
       base_image: devpanel/php:8.5-base
     secrets:
       dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
-      dp_ai_virtual_key: ${{ secrets.DP_AI_VIRTUAL_KEY }}
-      composer_auth: ${{ secrets.COMPOSER_AUTH }}
+      init_env: ${{ secrets.INIT_ENV }}
 ```
 
 ### GHCR path
@@ -77,8 +76,7 @@ jobs:
       files_to_hash: composer.lock package.json
       base_image: devpanel/php:8.5-base
     secrets:
-      dp_ai_virtual_key: ${{ secrets.DP_AI_VIRTUAL_KEY }}
-      composer_auth: ${{ secrets.COMPOSER_AUTH }}
+      init_env: ${{ secrets.INIT_ENV }}
 ```
 
 Keep this `permissions` block on the calling job whenever GHCR is a possible runtime outcome, including private repositories where Docker Hub credentials are present but the target Docker Hub repository does not already exist. The `actions: write` permission is required only for the optional early-cancel behavior when a hash match is detected.
@@ -120,7 +118,16 @@ For standalone composite action usage, pass it as an input instead:
 
 Omitting `init_env`, an empty input, and `{}` all add no variables. Otherwise, the input must be a single JSON object with string values and variable names matching `[A-Za-z_][A-Za-z0-9_]*`. Empty strings are allowed; CR, LF (multiline values), and NUL characters are not supported by Docker's environment-file format and are rejected. Invalid input fails without printing its contents.
 
-Values are masked in subsequent workflow logs and written to a temporary permission-restricted environment file, removed when the initialization step exits, including on failure. They are passed only to the `docker exec` command running `.devpanel/init.sh`, not to Docker builds, container startup, later dump commands, or the published image's environment. Caller variables override the default database variables for initialization; the dedicated `dp_ai_virtual_key` and `composer_auth` inputs take precedence over those same names in `init_env`.
+Values are masked in subsequent workflow logs and written to a temporary permission-restricted environment file, removed when the initialization step exits, including on failure. They are passed only to the `docker exec` command running `.devpanel/init.sh`, not to Docker builds, container startup, later dump commands, or the published image's environment. Caller variables override the default database variables for initialization.
+
+The `dp_ai_virtual_key` and `composer_auth` workflow secrets and action inputs are deprecated but retained for compatibility. Move their values into `init_env` under `DP_AI_VIRTUAL_KEY` and `COMPOSER_AUTH`, respectively. Each key present in `init_env` takes precedence over its legacy input, including when its value is an empty string. If a key is absent, its legacy input remains the fallback. For `COMPOSER_AUTH`, use a single-line JSON string as the value, for example:
+
+```json
+{
+  "DP_AI_VIRTUAL_KEY": "your-virtual-key",
+  "COMPOSER_AUTH": "{\"http-basic\":{\"example.com\":{\"username\":\"user\",\"password\":\"token\"}}}"
+}
+```
 
 Initialization scripts must not print transformed secrets or write secrets into files: filesystem changes made during initialization are included in the published image.
 
@@ -155,7 +162,8 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `base_image` (optional): Base Docker image to build from (default: `devpanel/php:8.3-base`)
 - `prepend_dockerfile_path` (optional): Path to a Dockerfile (relative to the app root) whose instructions are prepended before the base Dockerfile. Multi-stage builds with additional `FROM` stages are supported here. The file must not include a `# syntax=` directive. If omitted and `.devpanel/prepend.Dockerfile` exists in the app root, that file is prepended automatically.
 - `dockerfile_path` (optional): Path to a Dockerfile (relative to the app root) whose instructions are appended to the base Dockerfile. This file can `COPY --from` stages defined in `prepend_dockerfile_path`. The file must not include a `# syntax=` directive (which must appear on line 1 of a Dockerfile). If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
-- `composer_auth` (optional): Composer auth JSON for repositories that need private package access during init steps.
+- `dp_ai_virtual_key` (optional, deprecated): DevPanel AI Virtual Key fallback. Use `DP_AI_VIRTUAL_KEY` in `init_env` instead.
+- `composer_auth` (optional, deprecated): Composer auth JSON fallback for private package access. Use `COMPOSER_AUTH` in `init_env` instead.
 - `init_env` (optional): JSON object of string environment variables available only to `.devpanel/init.sh` at runtime. See [Initialization environment variables](#initialization-environment-variables).
 - `cancel_run_on_skip` (optional): Cancel the workflow run when the hash is unchanged (`skip=true`). Enabled unless set to `false`. Requires `actions: write` on `GITHUB_TOKEN` when enabled.
 
