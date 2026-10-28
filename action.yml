@@ -17,6 +17,9 @@ inputs:
   composer_auth:
     description: 'Composer auth JSON for private package access during init steps'
     required: false
+  init_env:
+    description: 'JSON object of string environment variables passed only to init.sh at runtime'
+    required: false
   image_repo:
     description: 'Docker Hub image repository'
     required: false
@@ -223,7 +226,29 @@ runs:
       env:
         DP_AI_VIRTUAL_KEY: ${{ inputs.dp_ai_virtual_key }}
         COMPOSER_AUTH: ${{ inputs.composer_auth }}
+        INIT_ENV: ${{ inputs.init_env }}
       run: |
+        INIT_ENV_FILE="$(mktemp)"
+        trap 'rm -f -- "$INIT_ENV_FILE"' EXIT
+        chmod 600 "$INIT_ENV_FILE"
+        if [ -n "$INIT_ENV" ]; then
+          if ! printf '%s' "$INIT_ENV" | jq -e -s '
+            length == 1 and (.[0] |
+              type == "object" and all(to_entries[];
+                (.key | test("^[A-Za-z_][A-Za-z0-9_]*\\z")) and
+                (.value | type == "string" and (test("[\r\n\u0000]") | not))
+              )
+            )
+          ' >/dev/null 2>&1; then
+            echo "::error::init_env must be a JSON object with valid environment variable names and string values without CR, LF, or NUL characters."
+            exit 1
+          fi
+          printf '%s' "$INIT_ENV" | jq -r '
+            .[] | select(length > 0) | "::add-mask::" + gsub("%"; "%25")
+          '
+          printf '%s' "$INIT_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value)"' > "$INIT_ENV_FILE"
+        fi
+
         TRANSIENT_ENV_FILE="$(mktemp)"
         cat <<'EOF' > "$TRANSIENT_ENV_FILE"
         DB_HOST=mysql
@@ -255,6 +280,7 @@ runs:
         '
         echo "INSTALL DRUPAL"
         docker exec --env-file "$TRANSIENT_ENV_FILE" \
+          --env-file "$INIT_ENV_FILE" \
           -e DP_AI_VIRTUAL_KEY \
           -e COMPOSER_AUTH \
           "$WEBSERVER" sh -c '$APP_ROOT/.devpanel/init.sh'
