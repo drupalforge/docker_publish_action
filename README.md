@@ -56,8 +56,11 @@ jobs:
       base_image: devpanel/php:8.5-base
     secrets:
       dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
-      dp_ai_virtual_key: ${{ secrets.DP_AI_VIRTUAL_KEY }}
-      composer_auth: ${{ secrets.COMPOSER_AUTH }}
+      init_env: |
+        {
+          "OPENAI_KEY": ${{ toJSON(secrets.OPENAI_KEY) }},
+          "SERVICE_TOKEN": ${{ toJSON(secrets.SERVICE_TOKEN) }}
+        }
 ```
 
 ### GHCR path
@@ -77,13 +80,69 @@ jobs:
       files_to_hash: composer.lock package.json
       base_image: devpanel/php:8.5-base
     secrets:
-      dp_ai_virtual_key: ${{ secrets.DP_AI_VIRTUAL_KEY }}
-      composer_auth: ${{ secrets.COMPOSER_AUTH }}
+      init_env: |
+        {
+          "OPENAI_KEY": ${{ toJSON(secrets.OPENAI_KEY) }},
+          "SERVICE_TOKEN": ${{ toJSON(secrets.SERVICE_TOKEN) }}
+        }
 ```
 
 Keep this `permissions` block on the calling job whenever GHCR is a possible runtime outcome, including private repositories where Docker Hub credentials are present but the target Docker Hub repository does not already exist. The `actions: write` permission is required only for the optional early-cancel behavior when a hash match is detected.
 
 If your repository is in the [Drupal Forge](https://github.com/drupalforge) organization, there will be a _Docker build and push template_ on the Actions tab that sets this up for you.
+
+### Initialization environment variables
+
+Store values as individual repository secrets, such as `OPENAI_KEY` and `SERVICE_TOKEN`, and assemble the JSON object in the calling workflow. Each secret can then be updated independently, without maintaining a combined `INIT_ENV` secret:
+
+```yaml
+jobs:
+  build-and-push:
+    permissions:
+      contents: read
+      packages: write
+    uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
+    secrets:
+      init_env: |
+        {
+          "OPENAI_KEY": ${{ toJSON(secrets.OPENAI_KEY) }},
+          "SERVICE_TOKEN": ${{ toJSON(secrets.SERVICE_TOKEN) }},
+          "SERVICE_URL": "https://example.com"
+        }
+```
+
+Apply `toJSON` to each secret value, without adding quotes around the expression. This safely escapes quotes, backslashes, and other JSON characters, including those in a single-line Composer auth JSON secret. Include only the secrets needed for initialization; do not pass `toJSON(secrets)`, which would forward unrelated credentials. A missing secret evaluates to an empty string, so omit its entry if you want to use a legacy fallback instead.
+
+For standalone composite action usage, pass it as an input instead:
+
+```yaml
+- uses: drupalforge/docker_publish_action@main
+  with:
+    init_env: |
+      {
+        "OPENAI_KEY": ${{ toJSON(secrets.OPENAI_KEY) }},
+        "SERVICE_TOKEN": ${{ toJSON(secrets.SERVICE_TOKEN) }}
+      }
+```
+
+An existing combined JSON secret is still supported via `init_env: ${{ secrets.INIT_ENV }}`. Pass it directly, without `toJSON`, to avoid encoding the entire object as a JSON string.
+
+Omitting `init_env`, an empty input, and `{}` all add no variables. Otherwise, the input must be a single JSON object with string values and variable names matching `[A-Za-z_][A-Za-z0-9_]*`. Empty strings are allowed; CR, LF (multiline values), and NUL characters are not supported by Docker's environment-file format and are rejected. Invalid input fails without printing its contents.
+
+Values are masked in subsequent workflow logs and written to a temporary permission-restricted environment file, removed when the initialization step exits, including on failure. They are passed only to the `docker exec` command running `.devpanel/init.sh`, not to Docker builds, container startup, later dump commands, or the published image's environment. Caller variables override the default database variables for initialization.
+
+The `dp_ai_virtual_key` and `composer_auth` workflow secrets and action inputs are deprecated but retained for compatibility. Reference the existing individual secrets in `init_env` under `DP_AI_VIRTUAL_KEY` and `COMPOSER_AUTH`, respectively. Each key present in `init_env` takes precedence over its legacy input, including when its value is an empty string. If a key is absent, its legacy input remains the fallback. Keep the `COMPOSER_AUTH` secret as single-line JSON:
+
+```yaml
+secrets:
+  init_env: |
+    {
+      "DP_AI_VIRTUAL_KEY": ${{ toJSON(secrets.DP_AI_VIRTUAL_KEY) }},
+      "COMPOSER_AUTH": ${{ toJSON(secrets.COMPOSER_AUTH) }}
+    }
+```
+
+Initialization scripts must not print transformed secrets or write secrets into files: filesystem changes made during initialization are included in the published image.
 
 ## Reusable Workflow Troubleshooting
 
@@ -116,7 +175,9 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `base_image` (optional): Base Docker image to build from (default: `devpanel/php:8.3-base`)
 - `prepend_dockerfile_path` (optional): Path to a Dockerfile (relative to the app root) whose instructions are prepended before the base Dockerfile. Multi-stage builds with additional `FROM` stages are supported here. The file must not include a `# syntax=` directive. If omitted and `.devpanel/prepend.Dockerfile` exists in the app root, that file is prepended automatically.
 - `dockerfile_path` (optional): Path to a Dockerfile (relative to the app root) whose instructions are appended to the base Dockerfile. This file can `COPY --from` stages defined in `prepend_dockerfile_path`. The file must not include a `# syntax=` directive (which must appear on line 1 of a Dockerfile). If omitted and `.devpanel/Dockerfile` exists in the app root, that file is appended automatically.
-- `composer_auth` (optional): Composer auth JSON for repositories that need private package access during init steps.
+- `dp_ai_virtual_key` (optional, deprecated): DevPanel AI Virtual Key fallback. Use `DP_AI_VIRTUAL_KEY` in `init_env` instead.
+- `composer_auth` (optional, deprecated): Composer auth JSON fallback for private package access. Use `COMPOSER_AUTH` in `init_env` instead.
+- `init_env` (optional): JSON object of string environment variables available only to `.devpanel/init.sh` at runtime. See [Initialization environment variables](#initialization-environment-variables).
 - `cancel_run_on_skip` (optional): Cancel the workflow run when the hash is unchanged (`skip=true`). Enabled unless set to `false`. Requires `actions: write` on `GITHUB_TOKEN` when enabled.
 
 **Outputs:**
@@ -145,7 +206,7 @@ Creates and pushes a multi-arch Docker manifest using digests from platform buil
 ## Configuration
 
 - The platform action expects a MySQL service to be available in your workflow.
-- All environment variables and build arguments are set in the Dockerfile and actions.
+- Build arguments and default environment variables are set in the Dockerfile and actions; caller-defined initialization variables use `init_env`.
 - Input and secret names must match between your workflow and the action.
 
 ## Lint Workflow

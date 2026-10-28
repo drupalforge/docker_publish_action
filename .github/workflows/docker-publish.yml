@@ -32,10 +32,13 @@ on:
         description: 'Docker Hub token'
         required: false
       dp_ai_virtual_key:
-        description: 'DevPanel AI Virtual Key'
+        description: 'Deprecated: use DP_AI_VIRTUAL_KEY in init_env. Retained as a fallback for compatibility.'
         required: false
       composer_auth:
-        description: 'Composer auth JSON for private package access during init steps'
+        description: 'Deprecated: use COMPOSER_AUTH in init_env. Retained as a fallback for compatibility.'
+        required: false
+      init_env:
+        description: 'JSON object of string environment variables passed only to init.sh at runtime'
         required: false
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -158,6 +161,7 @@ jobs:
           dockerhub_token: ${{ needs.determine-registry.outputs.use_dockerhub == 'true' && secrets.dockerhub_token || null }}
           dp_ai_virtual_key: ${{ secrets.dp_ai_virtual_key || null }}
           composer_auth: ${{ secrets.composer_auth || null }}
+          init_env: ${{ secrets.init_env }}
           image_repo: ${{ inputs.image_repo || github.repository }}
           files_to_hash: ${{ inputs.files_to_hash || null }}
           cached_hash: ${{ needs.retrieve-files-hash.outputs.cached_hash || null }}
