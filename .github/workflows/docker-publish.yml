@@ -27,6 +27,10 @@ on:
         description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. This file can COPY --from stages defined in prepend_dockerfile_path. Defaults to .devpanel/Dockerfile if it exists.'
         required: false
         type: string
+      max_parallel:
+        description: 'Maximum simultaneous architecture builds. Unlimited when unset or 0.'
+        required: false
+        type: number
     secrets:
       dockerhub_token:
         description: 'Docker Hub token'
@@ -150,6 +154,8 @@ jobs:
             runner: ubuntu-26.04
           - arch: linux/arm64
             runner: ubuntu-26.04-arm
+      # 256 is GitHub's matrix job limit, so it is effectively unlimited.
+      max-parallel: ${{ inputs.max_parallel || 256 }}
     steps:
       - name: Publish image
         id: publish
