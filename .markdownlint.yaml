@@ -1,3 +1,4 @@
+---
 # markdownlint configuration
 default: true
 MD013: false  # line-length: handled by editors

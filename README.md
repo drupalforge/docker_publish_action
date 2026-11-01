@@ -11,7 +11,7 @@ This project provides GitHub Actions and workflows for building, publishing, and
 - Automatic fallback from Docker Buildx cloud builder to local docker-container builder
 - MySQL service integration for post-build initialization
 - File hash-based change detection to skip unnecessary builds
-- Early workflow-run cancellation when hash is unchanged to stop parallel matrix jobs
+- Optional early workflow-run cancellation when hash is unchanged to stop slower emulated matrix jobs
 - Modular composite actions for platform builds and manifest publishing
 - Configurable base image
 - Extendable Dockerfile via `.devpanel/Dockerfile` or a custom path
@@ -23,6 +23,10 @@ This section applies to the reusable workflow at `.github/workflows/docker-publi
 
 The workflow builds `linux/amd64` on `ubuntu-26.04` and `linux/arm64` on the native `ubuntu-26.04-arm` runner, avoiding QEMU emulation for ARM builds. Architecture builds run in parallel without a limit by default; set the optional `max_parallel` input to cap simultaneous builds.
 
+Each matrix entry in the workflow's `define-matrix` job declares its runner architecture (`runner_arch`, such as `X64` or `ARM64`), which must match the selected runner. The workflow and action share the emulation check in `scripts/build-strategy.jq`, which compares target platforms with runner architecture. The action uses the actual `runner.arch` at runtime and separately attempts Docker Buildx Cloud when Docker Hub is used for a cross-architecture build.
+
+The workflow cancels the run on an unchanged hash only when an entry needs emulation, so a fast native job can stop a slow emulated sibling. Cloud-eligible cross-architecture jobs still enable cancellation: Cloud can fall back to local builds, and the built container runs locally for initialization. All current entries are native, so runs with an unchanged hash finish normally without cancellation.
+
 The reusable workflow chooses the target registry automatically:
 
 - If either `dockerhub_username` or `dockerhub_token` is missing, it uses GHCR.
@@ -31,7 +35,7 @@ The reusable workflow chooses the target registry automatically:
 
 ### Registry and permissions matrix
 
-| Runtime condition | Selected registry | Required caller job permissions |
+| Runtime condition | Selected registry | Registry-related caller permissions |
 | --- | --- | --- |
 | Missing `dockerhub_username` or `dockerhub_token` | GHCR | `contents: read`, `packages: write` |
 | Public repo + Docker Hub credentials present | Docker Hub | None beyond your default workflow permissions |
@@ -46,7 +50,7 @@ Use this when you want to publish to Docker Hub:
 jobs:
   build-and-push:
     permissions:
-      actions: write  # Optional: only needed when cancel_run_on_skip is enabled (the default behavior)
+      actions: write  # Enables hash-cache cleanup and cancellation for emulated builds
       contents: read
     uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
     with:
@@ -71,7 +75,7 @@ Use this when you want to publish to GHCR. This path is selected when Docker Hub
 jobs:
   build-and-push:
     permissions:
-      actions: write  # Optional: only needed when cancel_run_on_skip is enabled (the default behavior)
+      actions: write  # Enables hash-cache cleanup and cancellation for emulated builds
       contents: read
       packages: write
     uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
@@ -87,7 +91,7 @@ jobs:
         }
 ```
 
-Keep this `permissions` block on the calling job whenever GHCR is a possible runtime outcome, including private repositories where Docker Hub credentials are present but the target Docker Hub repository does not already exist. The `actions: write` permission is required only for the optional early-cancel behavior when a hash match is detected.
+Keep this `permissions` block on the calling job whenever GHCR is a possible runtime outcome, including private repositories where Docker Hub credentials are present but the target Docker Hub repository does not already exist. The `actions: write` permission allows the workflow to delete old hash caches and, when an architecture uses emulation, cancel a run after a hash match. Without it, those operations cannot succeed, but their failure does not fail the workflow.
 
 If your repository is in the [Drupal Forge](https://github.com/drupalforge) organization, there will be a _Docker build and push template_ on the Actions tab that sets this up for you.
 
@@ -99,6 +103,7 @@ Store values as individual repository secrets, such as `OPENAI_KEY` and `SERVICE
 jobs:
   build-and-push:
     permissions:
+      actions: write
       contents: read
       packages: write
     uses: drupalforge/docker_publish_action/.github/workflows/docker-publish.yml@main
@@ -178,7 +183,7 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `dp_ai_virtual_key` (optional, deprecated): DevPanel AI Virtual Key fallback. Use `DP_AI_VIRTUAL_KEY` in `init_env` instead.
 - `composer_auth` (optional, deprecated): Composer auth JSON fallback for private package access. Use `COMPOSER_AUTH` in `init_env` instead.
 - `init_env` (optional): JSON object of string environment variables available only to `.devpanel/init.sh` at runtime. See [Initialization environment variables](#initialization-environment-variables).
-- `cancel_run_on_skip` (optional): Cancel the workflow run when the hash is unchanged (`skip=true`). Enabled unless set to `false`. Requires `actions: write` on `GITHUB_TOKEN` when enabled.
+- `cancel_run_on_skip` (optional): Set to `true` to cancel the workflow run when the hash is unchanged (`skip=true`). Disabled by default. Requires `actions: write` on `GITHUB_TOKEN` when enabled.
 
 **Outputs:**
 
@@ -186,7 +191,7 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `skip`: Skip manifest generation
 - `image`: Image digest for this platform
 
-When `cached_hash` matches the computed `hash`, the action sets `skip=true`. Unless `cancel_run_on_skip` is set to `false`, the action also attempts to cancel the current workflow run to stop sibling jobs in a matrix. For cancellation to succeed, the caller must grant `actions: write` to `GITHUB_TOKEN`. If that permission is missing, or if the runner does not provide the `gh` CLI, the action logs a warning and continues without failing the workflow. Set `cancel_run_on_skip: false` to opt out of run-wide cancellation.
+When `cached_hash` matches the computed `hash`, the action sets `skip=true`. When `cancel_run_on_skip` is `true`, the action also attempts to cancel the current workflow run to stop sibling jobs in a matrix. Enable it only when a sibling builds on QEMU emulation and would otherwise run much longer; GitHub reports cancelled runs with a cancellation error annotation. For cancellation to succeed, the caller must grant `actions: write` to `GITHUB_TOKEN`. If that permission is missing, or if the runner does not provide the `gh` CLI, the action logs a warning and continues without failing the workflow.
 
 ### Manifest Action (`manifest/action.yml`)
 

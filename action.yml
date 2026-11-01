@@ -1,3 +1,4 @@
+---
 name: 'Drupal Forge build platform image'
 description: 'Builds and pushes a platform image tagged by branch name to a container registry for a Drupal Forge template.'
 author: 'Drupal Forge'
@@ -43,7 +44,7 @@ inputs:
     description: 'Path to a Dockerfile (relative to app root) whose instructions are appended to the base Dockerfile. This file can COPY --from stages defined in prepend_dockerfile_path. The file must not include a "# syntax=" directive. Defaults to .devpanel/Dockerfile if it exists.'
     required: false
   cancel_run_on_skip:
-    description: 'Cancel the workflow run when the hash is unchanged (skip=true) unless set to false. Requires actions: write permission on GITHUB_TOKEN.'
+    description: 'Set to true to cancel the workflow run when the hash is unchanged (skip=true), stopping slower sibling matrix jobs such as builds on QEMU emulation. Disabled by default. Requires actions: write permission on GITHUB_TOKEN.'
     required: false
 runs:
   using: "composite"
@@ -78,12 +79,29 @@ runs:
         username: ${{ github.actor }}
         password: ${{ github.token }}
 
+    - name: Select build strategy
+      id: build_strategy
+      env:
+        BUILD_PLATFORM: ${{ inputs.build_platform }}
+        BUILD_RUNNER_ARCH: ${{ runner.arch }}
+        USE_DOCKERHUB: ${{ steps.registry.outputs.use_dockerhub }}
+        STRATEGY_PATH: ${{ github.action_path }}/scripts
+      run: |
+        jq -nr -L "$STRATEGY_PATH" \
+          --arg platform "$BUILD_PLATFORM" \
+          --arg runner_arch "$BUILD_RUNNER_ARCH" \
+          --argjson dockerhub "$USE_DOCKERHUB" \
+          'include "build-strategy";
+           build_strategy($platform; $runner_arch; $dockerhub)
+           | to_entries[] | "\(.key)=\(.value)"' >> "$GITHUB_OUTPUT"
+      shell: bash
+
     - name: Set up QEMU
-      if: inputs.build_platform && inputs.build_platform != 'linux/amd64' && runner.arch != 'ARM64'
+      if: steps.build_strategy.outputs.emulated == 'true'
       uses: docker/setup-qemu-action@v4.0.0
 
     - name: Try Docker Buildx Cloud builder
-      if: inputs.build_platform && inputs.build_platform != 'linux/amd64' && runner.arch != 'ARM64' && steps.registry.outputs.use_dockerhub == 'true'
+      if: steps.build_strategy.outputs.use_cloud == 'true'
       id: buildx_cloud
       continue-on-error: true
       uses: docker/setup-buildx-action@v4.0.0
@@ -347,7 +365,7 @@ runs:
       shell: bash
 
     - name: Cancel workflow run when hash is unchanged
-      if: steps.compare_hash.outputs.skip == 'true' && inputs.cancel_run_on_skip != 'false'
+      if: steps.compare_hash.outputs.skip == 'true' && inputs.cancel_run_on_skip == 'true'
       continue-on-error: true
       env:
         GH_TOKEN: ${{ github.token }}

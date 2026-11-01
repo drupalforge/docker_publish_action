@@ -1,3 +1,4 @@
+---
 name: 'Drupal Forge publish image manifest'
 description: 'Pushes an image manifest to Docker Hub for a Drupal Forge template.'
 author: 'Drupal Forge'

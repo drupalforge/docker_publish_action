@@ -1,3 +1,4 @@
+---
 name: Docker build and push workflow
 on:
   workflow_call:
@@ -48,6 +49,34 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  define-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      has_emulation: ${{ steps.matrix.outputs.has_emulation }}
+    steps:
+      - name: Check out build strategy
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: drupalforge/docker_publish_action
+          ref: main
+          path: docker-publish-action
+          persist-credentials: false
+      - name: Define build matrix
+        id: matrix
+        run: |
+          MATRIX='{"include":[
+            {"arch":"linux/amd64","runner":"ubuntu-26.04","runner_arch":"X64"},
+            {"arch":"linux/arm64","runner":"ubuntu-26.04-arm","runner_arch":"ARM64"}
+          ]}'
+          MATRIX=$(jq -c -L docker-publish-action/scripts \
+            'include "build-strategy";
+             .include |= map(. + {emulated: emulation_required(.arch; .runner_arch)})' <<< "$MATRIX")
+          HAS_EMULATION=$(jq -r 'any(.include[]; .emulated)' <<< "$MATRIX")
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "has_emulation=$HAS_EMULATION" >> "$GITHUB_OUTPUT"
+        shell: bash
+
   retrieve-files-hash:
     runs-on: ubuntu-latest
     steps:
@@ -64,7 +93,7 @@ jobs:
         if: github.event_name != 'push' && steps.cache.outputs.cache-matched-key
         id: read_cached_hash
         run: |
-          echo "cached_hash=$(cat .files_hash.cache)" >> $GITHUB_OUTPUT
+          echo "cached_hash=$(cat .files_hash.cache)" >> "$GITHUB_OUTPUT"
           cat .files_hash.cache
         shell: bash
     outputs:
@@ -90,11 +119,11 @@ jobs:
           fi
           # Public repo → Docker Hub
           if [ "$REPO_PRIVATE" = "false" ]; then
-            echo "use_dockerhub=true" >> $GITHUB_OUTPUT
+            echo "use_dockerhub=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Private repo: only use Docker Hub when the repository already exists.
-          echo "check_private_repo=true" >> $GITHUB_OUTPUT
+          echo "check_private_repo=true" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Log in to Docker Hub
@@ -120,17 +149,17 @@ jobs:
           set -e
 
           if [ "$INSPECT_EXIT" -eq 0 ]; then
-            echo "use_dockerhub=true" >> $GITHUB_OUTPUT
+            echo "use_dockerhub=true" >> "$GITHUB_OUTPUT"
           else
             if echo "$INSPECT_OUTPUT" | grep -qi "manifest unknown"; then
               # Repo exists but latest tag does not.
-              echo "use_dockerhub=true" >> $GITHUB_OUTPUT
+              echo "use_dockerhub=true" >> "$GITHUB_OUTPUT"
             fi
           fi
         shell: bash
 
   build-and-push:
-    needs: [retrieve-files-hash, determine-registry]
+    needs: [define-matrix, retrieve-files-hash, determine-registry]
     runs-on: ${{ matrix.runner }}
     services:
       mysql:
@@ -148,12 +177,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     strategy:
-      matrix:
-        include:
-          - arch: linux/amd64
-            runner: ubuntu-26.04
-          - arch: linux/arm64
-            runner: ubuntu-26.04-arm
+      matrix: ${{ fromJSON(needs.define-matrix.outputs.matrix) }}
       # 256 is GitHub's matrix job limit, so it is effectively unlimited.
       max-parallel: ${{ inputs.max_parallel || 256 }}
     steps:
@@ -175,6 +199,8 @@ jobs:
           base_image: ${{ inputs.base_image || null }}
           prepend_dockerfile_path: ${{ inputs.prepend_dockerfile_path || null }}
           dockerfile_path: ${{ inputs.dockerfile_path || null }}
+          # Cancel sibling jobs only when one of them is slowed by emulation.
+          cancel_run_on_skip: ${{ needs.define-matrix.outputs.has_emulation }}
 
       - name: Save image ID to file
         if: steps.publish.outputs.skip != 'true'
@@ -182,7 +208,7 @@ jobs:
         run: |
           ARCH_SAFE="${{ matrix.arch }}"
           ARCH_SAFE="${ARCH_SAFE//\//_}"
-          echo "arch_safe=$ARCH_SAFE" >> $GITHUB_OUTPUT
+          echo "arch_safe=$ARCH_SAFE" >> "$GITHUB_OUTPUT"
           echo '{ "${{ matrix.arch }}": "${{ steps.publish.outputs.image }}" }' > "${ARCH_SAFE}-image_id.json"
 
       - name: Upload artifact with image ID
@@ -210,7 +236,7 @@ jobs:
       - name: Merge image ID artifacts to JSON
         id: images
         run: |
-          echo "images=$(jq -s 'add' ./artifacts/* | jq -c .)" >> $GITHUB_OUTPUT
+          echo "images=$(jq -s 'add' ./artifacts/* | jq -c .)" >> "$GITHUB_OUTPUT"
 
       - uses: drupalforge/docker_publish_action/manifest@main
         with:
