@@ -23,6 +23,10 @@ This section applies to the reusable workflow at `.github/workflows/docker-publi
 
 The workflow builds `linux/amd64` on `ubuntu-26.04` and `linux/arm64` on the native `ubuntu-26.04-arm` runner, avoiding QEMU emulation for ARM builds. Architecture builds run in parallel without a limit by default; set the optional `max_parallel` input to cap simultaneous builds.
 
+Set `image_tag` to override the primary image tag (for example, `php-8.5`), and `additional_tags` to a space- or newline-separated list of extra tags (for example, `latest`). Without `image_tag`, the primary tag is the branch or tag name, and `latest` is also published on the default branch. When `image_tag` is set, `latest` is published only if it is listed in `additional_tags`. Each architecture image is pushed under the primary tag, and hash caches and digest artifacts are keyed by it. Image tags must follow Docker's 1-128 character tag syntax.
+
+To publish several image variants from one caller, call the workflow from a matrix job with a distinct `image_tag` per entry. The concurrency group and architecture artifact names include `image_tag` when it is set, so matrix entries do not cancel each other or share image digests. Concurrency group names are case-insensitive, so primary tags that differ only in case share a group. Without `image_tag`, the concurrency group is based only on the caller workflow name and ref. Do not add a caller concurrency group identical to the reusable workflow's group. A skip-triggered cancellation (only used when a build needs emulation) cancels the whole caller run, including other matrix entries.
+
 Each matrix entry in the workflow's `define-matrix` job declares its runner architecture (`runner_arch`, such as `X64` or `ARM64`), which must match the selected runner. The workflow and action share the emulation check in `scripts/build-strategy.jq`, which compares target platforms with runner architecture. The action uses the actual `runner.arch` at runtime and separately attempts Docker Buildx Cloud when Docker Hub is used for a cross-architecture build.
 
 The workflow cancels the run on an unchanged hash only when an entry needs emulation, so a fast native job can stop a slow emulated sibling. Cloud-eligible cross-architecture jobs still enable cancellation: Cloud can fall back to local builds, and the built container runs locally for initialization. All current entries are native, so runs with an unchanged hash finish normally without cancellation.
@@ -174,6 +178,7 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `dockerhub_username` (optional): Docker Hub username. If omitted (or if `dockerhub_token` is omitted), the action uses GHCR.
 - `dockerhub_token` (optional): Docker Hub token. If omitted (or if `dockerhub_username` is omitted), the action uses GHCR.
 - `image_repo` (optional): Docker Hub image repository (defaults to GitHub repository)
+- `image_tag` (optional): Image tag (defaults to the branch or tag name)
 - `files_to_hash` (optional): List of files to check for changes (default: `composer.lock`)
 - `cached_hash` (optional): Previously cached files hash for comparison
 - `build_platform` (optional): Target platform (e.g., `linux/amd64`, `linux/arm64`)
@@ -187,11 +192,11 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 
 **Outputs:**
 
-- `hash`: Files hash
+- `hash`: Hash of the hashed files combined with the commit SHA
 - `skip`: Skip manifest generation
 - `image`: Image digest for this platform
 
-When `cached_hash` matches the computed `hash`, the action sets `skip=true`. When `cancel_run_on_skip` is `true`, the action also attempts to cancel the current workflow run to stop sibling jobs in a matrix. Enable it only when a sibling builds on QEMU emulation and would otherwise run much longer; GitHub reports cancelled runs with a cancellation error annotation. For cancellation to succeed, the caller must grant `actions: write` to `GITHUB_TOKEN`. If that permission is missing, or if the runner does not provide the `gh` CLI, the action logs a warning and continues without failing the workflow.
+Outside `push` events, the action sets `skip=true` when `cached_hash` matches the computed `hash`. The hash includes the commit SHA, so a new commit, such as one that changes the published tags, always rebuilds. If tags change without a new commit (for example, through repository variables or `workflow_dispatch` inputs), delete the cache entries whose keys start with `files-hash:<image repo>:<primary tag>:` before running the workflow. Delete them on the repository's Actions > Caches page or with `gh cache delete`. Otherwise the run may be skipped and the new tags not published. When `cancel_run_on_skip` is `true`, the action also attempts to cancel the current workflow run to stop sibling jobs in a matrix. Enable it only when a sibling builds on QEMU emulation and would otherwise run much longer; GitHub reports cancelled runs with a cancellation error annotation. For cancellation to succeed, the caller must grant `actions: write` to `GITHUB_TOKEN`. If that permission is missing, or if the runner does not provide the `gh` CLI, the action logs a warning and continues without failing the workflow.
 
 ### Manifest Action (`manifest/action.yml`)
 
@@ -202,6 +207,8 @@ Creates and pushes a multi-arch Docker manifest using digests from platform buil
 - `dockerhub_username` (optional): Docker Hub username. If omitted (or if `dockerhub_token` is omitted), the action uses GHCR.
 - `dockerhub_token` (optional): Docker Hub token. If omitted (or if `dockerhub_username` is omitted), the action uses GHCR.
 - `image_repo` (optional): Docker Hub image repository (defaults to GitHub repository)
+- `image_tag` (optional): Primary image tag (defaults to the branch or tag name, in which case `latest` is also published on the default branch)
+- `additional_tags` (optional): Space- or newline-separated additional image tags
 - `manifest_images` (required): JSON map of platform labels to image digests
 
 **Outputs:**

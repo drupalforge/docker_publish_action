@@ -24,6 +24,9 @@ inputs:
   image_repo:
     description: 'Docker Hub image repository'
     required: false
+  image_tag:
+    description: 'Image tag. Defaults to the branch or tag name.'
+    required: false
   files_to_hash:
     description: 'List of files to check for changes (space or newline separated). Relative paths are assumed to be in app root. Defaults to composer.lock if not provided.'
     required: false
@@ -347,6 +350,10 @@ runs:
             done
           fi
         fi
+        if [ -n "$HASH" ]; then
+          # Include the commit so a new commit always rebuilds, even with unchanged files.
+          HASH=$(printf '%s%s' "$HASH" "$GITHUB_SHA" | sha256sum | awk '{print $1}')
+        fi
         echo "hash=$HASH" >> $GITHUB_OUTPUT
       shell: bash
 
@@ -391,10 +398,12 @@ runs:
     - name: Commit and push the container state
       if: steps.compare_hash.outputs.skip != 'true'
       id: push_image
+      env:
+        IMAGE_TAG: ${{ inputs.image_tag || github.ref_name }}
       run: |
-        docker commit $WEBSERVER $IMAGE_REPO:${{ github.ref_name }}
-        docker push $IMAGE_REPO:${{ github.ref_name }}
-        IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_REPO:${{ github.ref_name }})
+        docker commit "$WEBSERVER" "$IMAGE_REPO:$IMAGE_TAG"
+        docker push "$IMAGE_REPO:$IMAGE_TAG"
+        IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_REPO:$IMAGE_TAG")
         echo "image=$IMAGE" >> $GITHUB_OUTPUT
       shell: bash
 

@@ -7,6 +7,8 @@ This action creates and pushes a Docker manifest for a multi-arch image, using d
 - `dockerhub_username` (optional): Docker Hub username. If omitted (or if `dockerhub_token` is omitted), the action uses GHCR.
 - `dockerhub_token` (optional): Docker Hub token. If omitted (or if `dockerhub_username` is omitted), the action uses GHCR.
 - `image_repo` (optional): Docker Hub image repository (defaults to GitHub repository)
+- `image_tag` (optional): Primary image tag (defaults to the branch or tag name, in which case `latest` is also published on the default branch)
+- `additional_tags` (optional): Space- or newline-separated additional image tags
 - `manifest_images` (required): JSON map of platform labels to image digests
 
 When using GHCR, ensure the calling workflow grants:

@@ -11,6 +11,14 @@ on:
         description: 'Docker Hub image repository. Defaults to the repository name if not provided.'
         required: false
         type: string
+      image_tag:
+        description: 'Primary image tag. Defaults to the branch or tag name, in which case latest is also published on the default branch.'
+        required: false
+        type: string
+      additional_tags:
+        description: 'Additional image tags to publish (space or newline separated).'
+        required: false
+        type: string
       files_to_hash:
         description: 'List of files to check for changes (space or newline separated). Relative paths are assumed to be in app root. Defaults to composer.lock if not provided.'
         required: false
@@ -46,7 +54,7 @@ on:
         description: 'JSON object of string environment variables passed only to init.sh at runtime'
         required: false
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.image_tag && format('-{0}', inputs.image_tag) || '' }}
   cancel-in-progress: true
 jobs:
   define-matrix:
@@ -85,9 +93,9 @@ jobs:
         uses: actions/cache/restore@v5.0.5
         with:
           path: .files_hash.cache
-          key: files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}:${{ github.run_id }}:${{ github.run_attempt }}
+          key: files-hash:${{ inputs.image_repo || github.repository }}:${{ inputs.image_tag || github.ref_name }}:${{ github.run_id }}:${{ github.run_attempt }}
           restore-keys: |
-            files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}
+            files-hash:${{ inputs.image_repo || github.repository }}:${{ inputs.image_tag || github.ref_name }}:
 
       - name: Read cached hash value
         if: github.event_name != 'push' && steps.cache.outputs.cache-matched-key
@@ -193,6 +201,7 @@ jobs:
           composer_auth: ${{ secrets.composer_auth || null }}
           init_env: ${{ secrets.init_env }}
           image_repo: ${{ inputs.image_repo || github.repository }}
+          image_tag: ${{ inputs.image_tag || github.ref_name }}
           files_to_hash: ${{ inputs.files_to_hash || null }}
           cached_hash: ${{ needs.retrieve-files-hash.outputs.cached_hash || null }}
           build_platform: ${{ matrix.arch }}
@@ -215,7 +224,8 @@ jobs:
         if: steps.publish.outputs.skip != 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: ${{ steps.save_image_id.outputs.arch_safe }}-image_id
+          # Tags cannot contain @, so the suffix isolates each image tag in a shared run.
+          name: ${{ steps.save_image_id.outputs.arch_safe }}-image_id@${{ inputs.image_tag || github.ref_name }}
           path: ${{ steps.save_image_id.outputs.arch_safe }}-image_id.json
     outputs:
       hash: ${{ steps.publish.outputs.hash }}
@@ -229,7 +239,7 @@ jobs:
       - name: Download image ID artifact
         uses: actions/download-artifact@v8.0.1
         with:
-          pattern: '*-image_id'
+          pattern: '*-image_id@${{ inputs.image_tag || github.ref_name }}'
           path: ./artifacts
           merge-multiple: true
 
@@ -243,6 +253,8 @@ jobs:
           dockerhub_username: ${{ needs.determine-registry.outputs.use_dockerhub == 'true' && inputs.dockerhub_username || null }}
           dockerhub_token: ${{ needs.determine-registry.outputs.use_dockerhub == 'true' && secrets.dockerhub_token || null }}
           image_repo: ${{ inputs.image_repo || github.repository }}
+          image_tag: ${{ inputs.image_tag || null }}
+          additional_tags: ${{ inputs.additional_tags || null }}
           manifest_images: ${{ steps.images.outputs.images }}
 
   store-files-hash:
@@ -274,4 +286,4 @@ jobs:
         uses: actions/cache/save@v5.0.5
         with:
           path: .files_hash.cache
-          key: files-hash:${{ inputs.image_repo || github.repository }}:${{ github.ref_name }}:${{ github.run_id }}:${{ github.run_attempt }}
+          key: files-hash:${{ inputs.image_repo || github.repository }}:${{ inputs.image_tag || github.ref_name }}:${{ github.run_id }}:${{ github.run_attempt }}

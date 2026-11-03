@@ -15,6 +15,12 @@ inputs:
   image_repo:
     description: 'Docker Hub image repository'
     required: false
+  image_tag:
+    description: 'Primary image tag. Defaults to the branch or tag name, in which case latest is also published on the default branch.'
+    required: false
+  additional_tags:
+    description: 'Additional image tags to publish (space or newline separated).'
+    required: false
   manifest_images:
     description: 'JSON map of platforms to images for manifest creation.'
     required: false
@@ -56,16 +62,18 @@ runs:
         fi
       shell: bash
 
-    - name: Set tag to be pushed to Docker Hub
+    - name: Set tags to be pushed
       if: steps.check_images.outputs.skip != 'true'
+      env:
+        IMAGE_TAG: ${{ inputs.image_tag || github.ref_name }}
+        ADDITIONAL_TAGS: ${{ inputs.additional_tags }}
+        PUBLISH_LATEST: ${{ !inputs.image_tag && github.ref_name == github.event.repository.default_branch }}
       run: |
-        echo "TAGS=${{ github.ref_name }}" >> $GITHUB_ENV
-      shell: bash
-
-    - name: Determine if the latest tag should be pushed to Docker Hub
-      if: steps.check_images.outputs.skip != 'true' && github.ref_name == github.event.repository.default_branch
-      run: |
-        echo "TAGS=${TAGS} latest" >> $GITHUB_ENV
+        TAGS="$IMAGE_TAG $ADDITIONAL_TAGS"
+        if [ "$PUBLISH_LATEST" = true ]; then
+          TAGS="$TAGS latest"
+        fi
+        echo "TAGS=$(tr -s '[:space:]' ' ' <<< "$TAGS")" >> "$GITHUB_ENV"
       shell: bash
 
     - name: Log in to Docker Hub
