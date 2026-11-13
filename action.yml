@@ -298,6 +298,24 @@ runs:
           ${{ steps.built_image.outputs.imageid }})
         echo "TRANSIENT_ENV_FILE=$TRANSIENT_ENV_FILE" >> $GITHUB_ENV
         echo "WEBSERVER=$WEBSERVER" >> $GITHUB_ENV
+        echo "WAIT FOR WEBSERVER"
+        for ((i = 1; ; i++)); do
+          STATUS=$(docker inspect --format '{{.State.Status}}' "$WEBSERVER")
+          if [ "$STATUS" != running ]; then
+            echo "::error::Webserver container is not running (status: $STATUS)."
+            docker logs "$WEBSERVER" || true
+            exit 1
+          fi
+          if docker exec "$WEBSERVER" curl -s -o /dev/null http://localhost/; then
+            break
+          fi
+          if [ "$i" -ge 300 ]; then
+            echo "::error::Webserver did not respond within 10 minutes."
+            docker logs "$WEBSERVER" || true
+            exit 1
+          fi
+          sleep 2
+        done
         docker exec $WEBSERVER bash -lc '
           echo "=== PHP INI ==="
           php --ini
