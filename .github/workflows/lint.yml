@@ -27,6 +27,8 @@ jobs:
         run: ./actionlint
       - name: Test build strategy
         run: jq -en -L scripts -f tests/build-strategy.jq
+      - name: Test GHCR visibility
+        run: jq -en -L scripts -f tests/ghcr-visibility.jq
 
   lint-dockerfile:
     name: Lint Dockerfile
