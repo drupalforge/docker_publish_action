@@ -11,10 +11,6 @@ on:
         description: 'Docker Hub image repository. Defaults to the repository name if not provided.'
         required: false
         type: string
-      ghcr_visibility:
-        description: 'GHCR package visibility: public or private. Defaults to public only when the image and public source repositories match.'
-        required: false
-        type: string
       image_tag:
         description: 'Primary image tag. Defaults to the branch or tag name, in which case latest is also published on the default branch.'
         required: false
@@ -205,7 +201,6 @@ jobs:
           composer_auth: ${{ secrets.composer_auth || null }}
           init_env: ${{ secrets.init_env }}
           image_repo: ${{ inputs.image_repo || github.repository }}
-          ghcr_visibility: ${{ inputs.ghcr_visibility }}
           image_tag: ${{ inputs.image_tag || github.ref_name }}
           files_to_hash: ${{ inputs.files_to_hash || null }}
           cached_hash: ${{ needs.retrieve-files-hash.outputs.cached_hash || null }}
@@ -258,7 +253,6 @@ jobs:
           dockerhub_username: ${{ needs.determine-registry.outputs.use_dockerhub == 'true' && inputs.dockerhub_username || null }}
           dockerhub_token: ${{ needs.determine-registry.outputs.use_dockerhub == 'true' && secrets.dockerhub_token || null }}
           image_repo: ${{ inputs.image_repo || github.repository }}
-          ghcr_visibility: ${{ inputs.ghcr_visibility }}
           image_tag: ${{ inputs.image_tag || null }}
           additional_tags: ${{ inputs.additional_tags || null }}
           manifest_images: ${{ steps.images.outputs.images }}

@@ -97,9 +97,7 @@ jobs:
 
 Keep this `permissions` block on the calling job whenever GHCR is a possible runtime outcome, including private repositories where Docker Hub credentials are present but the target Docker Hub repository does not already exist. The `actions: write` permission allows the workflow to delete old hash caches and, when an architecture uses emulation, cancel a run after a hash match. Without it, those operations cannot succeed, but their failure does not fail the workflow.
 
-For GHCR, set the optional `ghcr_visibility` input to `public` or `private` to override the default. When unset, the requested visibility is `public` only if the source repository is public and the full `image_repo` matches it (case-insensitively); otherwise it is `private`. This input has no effect on Docker Hub. Both composite actions accept it too.
-
-The action's existing visibility PATCH is best-effort, and GitHub's [documented Packages REST API](https://docs.github.com/en/rest/packages/packages) does not provide an endpoint to change visibility. Publishing continues if the request fails, so this input does **not** guarantee the package's actual visibility. Check and change package settings manually, especially before publishing sensitive images; GitHub also restricts changing public packages back to private.
+GHCR packages published from a workflow using `GITHUB_TOKEN` are automatically linked to the workflow repository. The platform action also labels the pushed image with the source repository to support linking. A new package normally starts private, but a linked package can inherit the repository's access permissions unless the organization disables automatic inheritance. This action does not change package visibility; check package settings and access before publishing sensitive images. Existing packages may need to be [connected to the repository manually](https://docs.github.com/en/packages/learn-github-packages/connecting-a-repository-to-a-package).
 
 If your repository is in the [Drupal Forge](https://github.com/drupalforge) organization, there will be a _Docker build and push template_ on the Actions tab that sets this up for you.
 
@@ -182,7 +180,6 @@ Builds a platform Docker image, runs post-build initialization, and outputs the 
 - `dockerhub_username` (optional): Docker Hub username. If omitted (or if `dockerhub_token` is omitted), the action uses GHCR.
 - `dockerhub_token` (optional): Docker Hub token. If omitted (or if `dockerhub_username` is omitted), the action uses GHCR.
 - `image_repo` (optional): Docker Hub image repository (defaults to GitHub repository)
-- `ghcr_visibility` (optional): Override GHCR package visibility with `public` or `private`; see [GHCR path](#ghcr-path) for defaults.
 - `image_tag` (optional): Image tag (defaults to the branch or tag name)
 - `files_to_hash` (optional): List of files to check for changes (default: `composer.lock`)
 - `cached_hash` (optional): Previously cached files hash for comparison
@@ -212,7 +209,6 @@ Creates and pushes a multi-arch Docker manifest using digests from platform buil
 - `dockerhub_username` (optional): Docker Hub username. If omitted (or if `dockerhub_token` is omitted), the action uses GHCR.
 - `dockerhub_token` (optional): Docker Hub token. If omitted (or if `dockerhub_username` is omitted), the action uses GHCR.
 - `image_repo` (optional): Docker Hub image repository (defaults to GitHub repository)
-- `ghcr_visibility` (optional): Override GHCR package visibility with `public` or `private`; see [GHCR path](#ghcr-path) for defaults.
 - `image_tag` (optional): Primary image tag (defaults to the branch or tag name, in which case `latest` is also published on the default branch)
 - `additional_tags` (optional): Space- or newline-separated additional image tags
 - `manifest_images` (required): JSON map of platform labels to image digests
