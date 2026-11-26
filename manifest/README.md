@@ -19,8 +19,6 @@ permissions:
   packages: write
 ```
 
-The manifest action uses the provided image digests as-is; it does not add source labels or change package visibility. When creating the platform images separately, add an `org.opencontainers.image.source` label pointing to the source repository to support [linking the package](https://docs.github.com/en/packages/learn-github-packages/connecting-a-repository-to-a-package). Linked packages may inherit repository access permissions. Check package settings before publishing sensitive images.
-
 ## Example Usage
 
 ```yaml

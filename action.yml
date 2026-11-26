@@ -418,14 +418,9 @@ runs:
       id: push_image
       env:
         IMAGE_TAG: ${{ inputs.image_tag || github.ref_name }}
-        USE_DOCKERHUB: ${{ steps.registry.outputs.use_dockerhub }}
         SOURCE_REPO: ${{ github.server_url }}/${{ github.repository }}
       run: |
-        if [ "$USE_DOCKERHUB" = "true" ]; then
-          docker commit "$WEBSERVER" "$IMAGE_REPO:$IMAGE_TAG"
-        else
-          docker commit --change "LABEL org.opencontainers.image.source=$SOURCE_REPO" "$WEBSERVER" "$IMAGE_REPO:$IMAGE_TAG"
-        fi
+        docker commit --change "LABEL org.opencontainers.image.source=$SOURCE_REPO" "$WEBSERVER" "$IMAGE_REPO:$IMAGE_TAG"
         docker push "$IMAGE_REPO:$IMAGE_TAG"
         IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_REPO:$IMAGE_TAG")
         echo "image=$IMAGE" >> $GITHUB_OUTPUT
