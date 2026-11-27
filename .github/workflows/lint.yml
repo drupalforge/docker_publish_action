@@ -27,6 +27,8 @@ jobs:
         run: ./actionlint
       - name: Test build strategy
         run: jq -en -L scripts -f tests/build-strategy.jq
+      - name: Test initialization environment
+        run: jq -en -L scripts -f tests/init-env.jq
 
   lint-dockerfile:
     name: Lint Dockerfile
