@@ -54,7 +54,7 @@ on:
         description: 'JSON object of string environment variables passed only to init.sh at runtime'
         required: false
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.image_tag && format('-{0}', inputs.image_tag) || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}:${{ inputs.image_repo || github.repository }}:${{ inputs.image_tag || github.ref_name }}
   cancel-in-progress: true
 jobs:
   define-matrix:
@@ -62,6 +62,7 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       has_emulation: ${{ steps.matrix.outputs.has_emulation }}
+      image_repo_encoded: ${{ steps.matrix.outputs.image_repo_encoded }}
     steps:
       - name: Check out build strategy
         uses: actions/checkout@v6.0.2
@@ -72,6 +73,8 @@ jobs:
           persist-credentials: false
       - name: Define build matrix
         id: matrix
+        env:
+          IMAGE_REPO: ${{ inputs.image_repo || github.repository }}
         run: |
           MATRIX='{"include":[
             {"arch":"linux/amd64","runner":"ubuntu-26.04","runner_arch":"X64"},
@@ -81,8 +84,11 @@ jobs:
             'include "build-strategy";
              .include |= map(. + {emulated: emulation_required(.arch; .runner_arch)})' <<< "$MATRIX")
           HAS_EMULATION=$(jq -r 'any(.include[]; .emulated)' <<< "$MATRIX")
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
-          echo "has_emulation=$HAS_EMULATION" >> "$GITHUB_OUTPUT"
+          {
+            echo "matrix=$MATRIX"
+            echo "has_emulation=$HAS_EMULATION"
+            echo "image_repo_encoded=$(jq -rn --arg repo "$IMAGE_REPO" '$repo | @uri')"
+          } >> "$GITHUB_OUTPUT"
         shell: bash
 
   retrieve-files-hash:
@@ -224,22 +230,21 @@ jobs:
         if: steps.publish.outputs.skip != 'true'
         uses: actions/upload-artifact@v7.0.1
         with:
-          # Tags cannot contain @, so the suffix isolates each image tag in a shared run.
-          name: ${{ steps.save_image_id.outputs.arch_safe }}-image_id@${{ inputs.image_tag || github.ref_name }}
+          name: ${{ steps.save_image_id.outputs.arch_safe }}-image_id@${{ needs.define-matrix.outputs.image_repo_encoded }}@${{ inputs.image_tag || github.ref_name }}
           path: ${{ steps.save_image_id.outputs.arch_safe }}-image_id.json
     outputs:
       hash: ${{ steps.publish.outputs.hash }}
       skip: ${{ steps.publish.outputs.skip }}
 
   create-manifest:
-    needs: [build-and-push, determine-registry]
+    needs: [build-and-push, define-matrix, determine-registry]
     if: needs.build-and-push.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download image ID artifact
         uses: actions/download-artifact@v8.0.1
         with:
-          pattern: '*-image_id@${{ inputs.image_tag || github.ref_name }}'
+          pattern: '*-image_id@${{ needs.define-matrix.outputs.image_repo_encoded }}@${{ inputs.image_tag || github.ref_name }}'
           path: ./artifacts
           merge-multiple: true
 
