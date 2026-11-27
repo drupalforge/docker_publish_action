@@ -248,26 +248,23 @@ runs:
         DP_AI_VIRTUAL_KEY: ${{ inputs.dp_ai_virtual_key }}
         COMPOSER_AUTH: ${{ inputs.composer_auth }}
         INIT_ENV: ${{ inputs.init_env }}
+        SCRIPTS_PATH: ${{ github.action_path }}/scripts
       run: |
         INIT_ENV_FILE="$(mktemp)"
         trap 'rm -f -- "$INIT_ENV_FILE"' EXIT
         chmod 600 "$INIT_ENV_FILE"
         if [ -n "$INIT_ENV" ]; then
-          if ! printf '%s' "$INIT_ENV" | jq -e -s '
-            length == 1 and (.[0] |
-              type == "object" and all(to_entries[];
-                (.key | test("^[A-Za-z_][A-Za-z0-9_]*\\z")) and
-                (.value | type == "string" and (test("[\r\n\u0000]") | not))
-              )
-            )
-          ' >/dev/null 2>&1; then
-            echo "::error::init_env must be a JSON object with valid environment variable names and string values without CR, LF, or NUL characters."
+          if ! NORMALIZED_INIT_ENV=$(printf '%s' "$INIT_ENV" | jq -ces -L "$SCRIPTS_PATH" '
+            include "init-env"; normalize_init_env
+          ' 2>/dev/null); then
+            echo "::error::init_env must be a JSON object with valid environment variable names and string values without NUL. Values containing CR or LF must themselves be valid JSON."
             exit 1
           fi
-          printf '%s' "$INIT_ENV" | jq -r '
-            .[] | select(length > 0) | "::add-mask::" + gsub("%"; "%25")
+          printf '%s\n%s\n' "$INIT_ENV" "$NORMALIZED_INIT_ENV" | jq -r '
+            .[] | select(length > 0) | "::add-mask::" +
+              (gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A"))
           '
-          printf '%s' "$INIT_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value)"' > "$INIT_ENV_FILE"
+          printf '%s' "$NORMALIZED_INIT_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value)"' > "$INIT_ENV_FILE"
         fi
 
         LEGACY_ENV_ARGS=()
