@@ -84,9 +84,11 @@ jobs:
             'include "build-strategy";
              .include |= map(. + {emulated: emulation_required(.arch; .runner_arch)})' <<< "$MATRIX")
           HAS_EMULATION=$(jq -r 'any(.include[]; .emulated)' <<< "$MATRIX")
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
-          echo "has_emulation=$HAS_EMULATION" >> "$GITHUB_OUTPUT"
-          echo "image_repo_hash=$(printf '%s' "$IMAGE_REPO" | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          {
+            echo "matrix=$MATRIX"
+            echo "has_emulation=$HAS_EMULATION"
+            echo "image_repo_hash=$(printf '%s' "$IMAGE_REPO" | sha256sum | cut -d ' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
         shell: bash
 
   retrieve-files-hash:
