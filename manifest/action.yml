@@ -107,18 +107,3 @@ runs:
           docker manifest push $IMAGE_REPO:$TAG
         done
       shell: bash
-
-    - name: Set GHCR package visibility
-      if: steps.check_images.outputs.skip != 'true' && steps.registry.outputs.use_dockerhub != 'true' && github.event.repository.private == false
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        PACKAGE_NAME=$(echo "$IMAGE_REPO" | sed 's|ghcr.io/[^/]*/||')
-        OWNER="${{ github.repository_owner }}"
-        OWNER_TYPE=$(gh api "/users/$OWNER" --jq '.type')
-        if [ "$OWNER_TYPE" = "Organization" ]; then
-          gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE_NAME" -f visibility=public || true
-        else
-          gh api -X PATCH "/user/packages/container/$PACKAGE_NAME" -f visibility=public || true
-        fi
-      shell: bash
